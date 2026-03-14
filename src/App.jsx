@@ -1,4 +1,4 @@
-// ChainMind v4 — workload persistence, skill gap alert, workload chart, overload protection, assignment history
+// ChainMind v4 — full-screen two-column landing, workload persistence, skill gap alert, overload protection
 
 // ── Bundled Data ──────────────────────────────────────────────────────────────
 const DEFAULT_EMPLOYEES = [
@@ -10,7 +10,6 @@ const DEFAULT_EMPLOYEES = [
   { id:"EMP006", name:"Meera Nair",    role:"AI Researcher",      skills:["LLMs","NLP","RAG","Deep Learning"],         experience:6, workload:55, color:"#EC4899" },
 ];
 
-// ── localStorage helpers ──────────────────────────────────────────────────────
 function loadEmployees(){
   try{ const s=localStorage.getItem("cm_employees"); if(s) return JSON.parse(s); }catch(e){}
   return DEFAULT_EMPLOYEES;
@@ -48,7 +47,7 @@ const PROVIDERS = [
   { key:"cohere",     label:"Cohere",           color:"#6366F1", desc:"Command R+"                  },
 ];
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, memo } from "react";
 import {
   runPlanner, runResearch, runExecution,
   runVerification, runMemory, runReport,
@@ -86,7 +85,16 @@ const WORKFLOW = [
   { agent:"report",       task:"Synthesize final structured report",       model:"frontier", expectedTokens:700 },
 ];
 
-// ── ParticleCanvas (unchanged from v6) ───────────────────────────────────────
+const AGENT_TOOLS = {
+  planner:      { call:[],               passive:["or"] },
+  research:     { call:["web","arxiv"],  passive:["or"] },
+  execution:    { call:["sql"],          passive:["web","or"] },
+  verification: { call:["or"],           passive:["web","sql"] },
+  memory:       { call:["drive"],        passive:["sql","or"] },
+  report:       { call:["or"],           passive:["drive","web"] },
+};
+
+// ── ParticleCanvas ────────────────────────────────────────────────────────────
 function ParticleCanvas() {
   const ref = useRef(null);
   useEffect(() => {
@@ -100,7 +108,7 @@ function ParticleCanvas() {
   return <canvas ref={ref} style={{position:"fixed",inset:0,zIndex:0,pointerEvents:"none"}}/>;
 }
 
-// ── Typewriter / StreamText (unchanged from v6) ───────────────────────────────
+// ── Typewriter / StreamText ───────────────────────────────────────────────────
 function Typewriter({text,speed=14,color="#94a3b8"}){
   const [out,setOut]=useState("");
   useEffect(()=>{setOut("");let i=0;const t=setInterval(()=>{setOut(text.slice(0,++i));if(i>=text.length)clearInterval(t);},speed);return()=>clearInterval(t);},[text,speed]);
@@ -113,7 +121,7 @@ function StreamText({text,speed=6}){
   return <span style={{whiteSpace:"pre-wrap"}}>{out}<span style={{animation:out.length<(text?.length||0)?"blink .5s infinite":"none",opacity:out.length<(text?.length||0)?1:0}}>▋</span></span>;
 }
 
-// ── DataFlowOverlay (unchanged from v6) ──────────────────────────────────────
+// ── DataFlowOverlay ───────────────────────────────────────────────────────────
 function DataFlowOverlay({containerRef,activeAgent,phase,agentCardRefs,traceRef,memRef}){
   const svgRef=useRef(null),animRef=useRef([]);
   useEffect(()=>{
@@ -175,11 +183,15 @@ function DataFlowOverlay({containerRef,activeAgent,phase,agentCardRefs,traceRef,
   return <svg ref={svgRef} style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none",zIndex:5,overflow:"visible"}}/>;
 }
 
-// ── MiniPreview (unchanged from v6) ──────────────────────────────────────────
-function MiniPreview(){
-  const [activeIdx,setActiveIdx]=useState(0),[doneSet,setDoneSet]=useState(new Set()),[progress,setProgress]=useState(0),[log,setLog]=useState([]),[particleT,setParticleT]=useState(0);
-  const agentList=Object.entries(AGENTS);
-  const FAKE_THOUGHTS={
+// ── MiniPreview — FIXED: no JS particle state, throttled ticks ────────────────
+const MiniPreviewInner = memo(function MiniPreviewInner() {
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [doneSet, setDoneSet] = useState(new Set());
+  const [progress, setProgress] = useState(0);
+  const [log, setLog] = useState([]);
+  const agentList = Object.entries(AGENTS);
+
+  const FAKE_THOUGHTS = {
     planner:     ["Decomposing goal into 4 parallel sub-tasks…","Routing task plan to Research agent"],
     research:    ["Querying Tavily web search API…","Found 12 relevant sources — filtering top 5"],
     execution:   ["Extracting structured data points…","Normalising 8 key findings"],
@@ -187,24 +199,37 @@ function MiniPreview(){
     memory:      ["Storing domain insights to long-term store…","Experience store updated (+3 entries)"],
     report:      ["Synthesising final structured report…","✓ Report complete — 840 tokens"],
   };
-  useEffect(()=>{
-    let idx=0,progTick=0;setDoneSet(new Set());setActiveIdx(0);setProgress(0);setLog([]);
-    const runNext=()=>{
-      if(idx>=agentList.length){setTimeout(()=>{idx=0;progTick=0;setDoneSet(new Set());setActiveIdx(0);setProgress(0);setLog([]);runNext();},2200);return;}
-      setActiveIdx(idx);setProgress(0);progTick=0;
-      const agKey=agentList[idx][0];
-      const thoughts=FAKE_THOUGHTS[agKey]||["Processing…","Complete"];
-      let tIdx=0;
-      const addThought=()=>{if(tIdx<thoughts.length){setLog(p=>[...p.slice(-5),{agent:agKey,msg:thoughts[tIdx],ts:Date.now()}]);tIdx++;}};
+
+  useEffect(() => {
+    let idx = 0, cancelled = false;
+    setDoneSet(new Set()); setActiveIdx(0); setProgress(0); setLog([]);
+    const runNext = () => {
+      if (cancelled) return;
+      if (idx >= agentList.length) {
+        setTimeout(() => { if (cancelled) return; idx = 0; setDoneSet(new Set()); setActiveIdx(0); setProgress(0); setLog([]); runNext(); }, 2200);
+        return;
+      }
+      setActiveIdx(idx); setProgress(0);
+      const agKey = agentList[idx][0];
+      const thoughts = FAKE_THOUGHTS[agKey] || ["Processing…","Complete"];
+      let tIdx = 0, tick = 0;
+      const addThought = () => { if (tIdx < thoughts.length) { setLog(p => [...p.slice(-5), { agent: agKey, msg: thoughts[tIdx], ts: Date.now() }]); tIdx++; } };
       addThought();
-      const dur=1100+Math.random()*600,interval=40,steps=dur/interval;
-      const t=setInterval(()=>{progTick++;setProgress(Math.min(100,Math.round(progTick/steps*100)));if(progTick===Math.floor(steps*0.5))addThought();if(progTick>=steps){clearInterval(t);setDoneSet(prev=>new Set([...prev,agKey]));idx++;setTimeout(runNext,180);}},interval);
+      const dur = 1100 + Math.random() * 600, steps = dur / 40;
+      const t = setInterval(() => {
+        if (cancelled) { clearInterval(t); return; }
+        tick++;
+        if (tick % 3 === 0) setProgress(Math.min(100, Math.round(tick / steps * 100)));
+        if (tick === Math.floor(steps * 0.5)) addThought();
+        if (tick >= steps) { clearInterval(t); setDoneSet(prev => new Set([...prev, agKey])); idx++; setTimeout(runNext, 180); }
+      }, 40);
     };
     runNext();
-  },[]);
-  useEffect(()=>{let f=0;const t=setInterval(()=>{f=(f+1.8)%100;setParticleT(f);},16);return()=>clearInterval(t);},[]);
+    return () => { cancelled = true; };
+  }, []);
+
   return (
-    <div style={{background:"var(--bg-panel)",border:"1px solid var(--border)",borderRadius:18,padding:"18px 20px",backdropFilter:"blur(28px)",boxShadow:"0 0 60px rgba(124,58,237,.15)",width:"100%",maxWidth:560}}>
+    <div style={{background:"var(--bg-panel)",border:"1px solid var(--border)",borderRadius:18,padding:"18px 20px",backdropFilter:"blur(28px)",boxShadow:"0 0 60px rgba(124,58,237,.15)",width:"100%"}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
         <div style={{width:7,height:7,borderRadius:"50%",background:"#10B981",boxShadow:"0 0 8px #10B981",animation:"breathe 1s infinite"}}/>
         <span style={{color:"#4ade80",fontSize:9,fontFamily:"monospace",letterSpacing:2}}>LIVE ORCHESTRATION PREVIEW</span>
@@ -217,14 +242,16 @@ function MiniPreview(){
         <div style={{position:"absolute",top:22,left:0,width:"100%",height:4,pointerEvents:"none"}}>
           {agentList.slice(0,-1).map(([key,a],i)=>{
             const isDone=doneSet.has(key),isActive=i===activeIdx;
-            const segW=100/agentList.length,barLeft=`${segW*i+segW*0.78}%`,barWidth=`${segW*0.44}%`;
-            const particleProgress=isDone?(particleT/100):(progress/100);
-            const particleLeft=`calc(${segW*i+segW*0.78}% + ${segW*0.44}% * ${particleProgress.toFixed(4)})`;
+            const segW=100/agentList.length;
+            const startPct=segW*i+segW*0.78, endPct=segW*(i+1)+segW*0.1, barWidthPct=endPct-startPct;
+            const fill=isDone?100:isActive?progress:0;
+            const ballLeft=startPct+(barWidthPct*fill/100);
+            const ballVisible=isActive&&fill<98;
             return(
               <div key={key}>
-                <div style={{position:"absolute",top:1,left:barLeft,width:barWidth,height:2,background:isDone?a.color+"55":"#1e293b",borderRadius:1,transition:"background .4s"}}/>
-                {isActive&&<div style={{position:"absolute",top:1,left:barLeft,width:`calc(${barWidth} * ${(progress/100).toFixed(4)})`,height:2,background:a.color,borderRadius:1,transition:"width .04s linear",boxShadow:`0 0 6px ${a.color}`}}/>}
-                {(isActive||isDone)&&<div style={{position:"absolute",top:-2,left:particleLeft,transform:"translateX(-50%)",width:7,height:7,borderRadius:"50%",background:a.color,boxShadow:`0 0 8px ${a.color}, 0 0 16px ${a.color}66`,transition:isDone?"left .016s linear":"none",pointerEvents:"none"}}/>}
+                <div style={{position:"absolute",top:1,left:`${startPct}%`,width:`${barWidthPct}%`,height:2,background:"#1e293b",borderRadius:1}}/>
+                <div style={{position:"absolute",top:1,left:`${startPct}%`,width:`${barWidthPct*fill/100}%`,height:2,borderRadius:1,background:`linear-gradient(90deg,${a.color}88,${a.color})`,boxShadow:`0 0 6px ${a.color}`,transition:isDone?"none":"width 0.06s linear"}}/>
+                {ballVisible&&<div style={{position:"absolute",top:-2,left:`${ballLeft}%`,transform:"translateX(-50%)",width:8,height:8,borderRadius:"50%",background:a.color,boxShadow:`0 0 10px ${a.color}, 0 0 20px ${a.color}66`,pointerEvents:"none",transition:"left 0.06s linear"}}/>}
               </div>
             );
           })}
@@ -232,10 +259,11 @@ function MiniPreview(){
         <div style={{display:"flex",gap:0,alignItems:"flex-start"}}>
           {agentList.map(([key,a],i)=>{
             const isDone=doneSet.has(key),isActive=i===activeIdx;
+            const initials=["PL","RE","EX","VE","ME","RP"][i]||a.label.slice(0,2).toUpperCase();
             return(
               <div key={key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
-                <div style={{width:42,height:42,borderRadius:13,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,position:"relative",overflow:"hidden",background:isActive?a.bg:isDone?a.bg.replace(".08",".05"):"rgba(8,8,20,.75)",border:`1.5px solid ${isActive?a.color:isDone?a.color+"55":"#151525"}`,boxShadow:isActive?`0 0 22px ${a.glow}55,0 0 44px ${a.glow}22`:"none",transition:"all .35s cubic-bezier(.4,0,.2,1)",animation:isActive?"float 2s ease-in-out infinite":"none"}}>
-                  {a.avatar}
+                <div style={{width:42,height:42,borderRadius:13,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,fontFamily:"monospace",position:"relative",overflow:"hidden",background:isActive?a.bg:isDone?a.bg.replace(".08",".05"):"rgba(8,8,20,.75)",border:`1.5px solid ${isActive?a.color:isDone?a.color+"55":"#151525"}`,boxShadow:isActive?`0 0 22px ${a.glow}55,0 0 44px ${a.glow}22`:"none",transition:"all .35s cubic-bezier(.4,0,.2,1)",animation:isActive?"float 2s ease-in-out infinite":"none",color:isActive?a.color:isDone?a.color+"aa":"#475569"}}>
+                  {initials}
                   {isActive&&<div style={{position:"absolute",bottom:0,left:0,height:2,background:a.color,width:`${progress}%`,transition:"width .04s linear",boxShadow:`0 0 8px ${a.color}`}}/>}
                   {isActive&&<div style={{position:"absolute",inset:0,background:`linear-gradient(105deg,transparent 35%,${a.color}14 50%,transparent 65%)`,backgroundSize:"200% 100%",animation:"shimmer 1.4s linear infinite"}}/>}
                   {isDone&&!isActive&&<div style={{position:"absolute",inset:0,background:a.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,color:a.color,animation:"fadeIn .25s ease"}}>✓</div>}
@@ -248,14 +276,20 @@ function MiniPreview(){
       </div>
       <div style={{marginTop:12,background:"var(--bg-card)",borderRadius:10,padding:"10px 12px",height:72,overflow:"hidden",position:"relative",border:"1px solid var(--border-subtle)"}}>
         <div style={{position:"absolute",inset:0,background:"linear-gradient(180deg,transparent 0%,var(--bg-card) 100%)",zIndex:1,borderRadius:10,pointerEvents:"none"}}/>
-        {log.length===0&&<div style={{color:"var(--text-dim)",fontSize:9,fontFamily:"monospace",paddingTop:4}}>Initialising agents…</div>}
-        {[...log].reverse().slice(0,4).map((entry,i)=>{const a=AGENTS[entry.agent];return(
-          <div key={i} style={{display:"flex",gap:7,alignItems:"center",marginBottom:5,opacity:Math.max(0.1,1-i*0.28),animation:i===0?"fadeSlideIn .25s ease":"none"}}>
-            <span style={{fontSize:9}}>{a.avatar}</span>
-            <span style={{color:a.color,fontSize:8,fontFamily:"monospace",fontWeight:600,width:48,flexShrink:0}}>{a.label.slice(0,6).toUpperCase()}</span>
-            <span style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace"}}>{entry.msg}</span>
-          </div>
-        );})}
+        {log.length===0&&<div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",paddingTop:4}}>Initialising agents…</div>}
+        {[...log].reverse().slice(0,4).map((entry,i)=>{
+          const a=AGENTS[entry.agent];
+          const agentKeys=Object.keys(AGENTS);
+          const agentIdx=agentKeys.indexOf(entry.agent);
+          const initials=["PL","RE","EX","VE","ME","RP"][agentIdx]||entry.agent.slice(0,2).toUpperCase();
+          return(
+            <div key={i} style={{display:"flex",gap:7,alignItems:"center",marginBottom:5,opacity:Math.max(0.1,1-i*0.28),animation:i===0?"fadeSlideIn .25s ease":"none"}}>
+              <span style={{fontSize:8,fontWeight:800,fontFamily:"monospace",color:a.color,width:18,textAlign:"center",flexShrink:0}}>{initials}</span>
+              <span style={{color:a.color,fontSize:8,fontFamily:"monospace",fontWeight:600,width:48,flexShrink:0}}>{a.label.slice(0,6).toUpperCase()}</span>
+              <span style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace"}}>{entry.msg}</span>
+            </div>
+          );
+        })}
       </div>
       <div style={{display:"flex",gap:12,marginTop:10,paddingTop:10,borderTop:"1px solid var(--border-subtle)"}}>
         {[{label:"AGENTS",val:`${doneSet.size}/6`,color:"#818cf8"},{label:"MODEL ROUTING",val:"3-tier",color:"#34d399"},{label:"GATE",val:"active",color:"#fbbf24"},{label:"MEMORY",val:"live",color:"#a78bfa"}].map(m=>(
@@ -267,9 +301,11 @@ function MiniPreview(){
       </div>
     </div>
   );
-}
+});
 
-// ── ConfidenceGauge (unchanged from v6) ──────────────────────────────────────
+function MiniPreview(){ return <MiniPreviewInner/>; }
+
+// ── ConfidenceGauge ───────────────────────────────────────────────────────────
 function ConfidenceGauge({score}){
   const r=38,cx=50,cy=54,strokeW=7,circumference=Math.PI*r,pct=Math.min(100,Math.max(0,score))/100,dash=pct*circumference,color=score>=80?"#34d399":score>=60?"#fbbf24":"#f472b6";
   const [animated,setAnimated]=useState(0);
@@ -291,7 +327,7 @@ function ConfidenceGauge({score}){
   );
 }
 
-// ── SkeletonCard (unchanged from v6) ─────────────────────────────────────────
+// ── SkeletonCard ──────────────────────────────────────────────────────────────
 function SkeletonCard({index,agent}){
   const a=AGENTS[agent];
   const [vis,setVis]=useState(false);
@@ -313,7 +349,7 @@ function SkeletonCard({index,agent}){
   );
 }
 
-// ── AgentCard (unchanged from v6) ────────────────────────────────────────────
+// ── AgentCard ─────────────────────────────────────────────────────────────────
 function AgentCard({agent,status,task,model,isActive,progress,index,realOutput,tokenCount,onHover}){
   const a=AGENTS[agent],tier=MODEL_TIERS[model];
   const [vis,setVis]=useState(false),[expanded,setExpanded]=useState(false),[displayTokens,setDisplayTokens]=useState(0);
@@ -357,7 +393,7 @@ function AgentCard({agent,status,task,model,isActive,progress,index,realOutput,t
   );
 }
 
-// ── ThoughtTrace (unchanged from v6) ─────────────────────────────────────────
+// ── ThoughtTrace ──────────────────────────────────────────────────────────────
 function ThoughtTrace({entries,isRunning,hoveredAgent}){
   const endRef=useRef(null);
   useEffect(()=>endRef.current?.scrollIntoView({behavior:"smooth"}),[entries]);
@@ -378,15 +414,15 @@ function ThoughtTrace({entries,isRunning,hoveredAgent}){
       {entries.map((e,i)=>{
         const a=AGENTS[e.agent],isLast=i===entries.length-1,isHighlighted=hoveredAgent===e.agent;
         return (
-          <div key={i} style={{marginBottom:11,opacity:hoveredAgent?(isHighlighted?1:0.15):isLast?1:.42,animation:isLast?"fadeSlideIn .3s ease":"none",transition:"opacity .2s ease,background .2s ease",background:isHighlighted?"rgba(255,255,255,0.03)":"transparent",borderRadius:isHighlighted?8:0,padding:isHighlighted?"6px 8px":0,margin:isHighlighted?"0 -8px 11px -8px":undefined}}>
+          <div key={i} style={{marginBottom:11,opacity:hoveredAgent?(isHighlighted?1:0.18):isLast?1:.65,animation:isLast?"fadeSlideIn .3s ease":"none",transition:"opacity .2s ease,background .2s ease",background:isHighlighted?"rgba(128,128,128,0.06)":"transparent",borderRadius:isHighlighted?8:0,padding:isHighlighted?"6px 8px":0,margin:isHighlighted?"0 -8px 11px -8px":undefined}}>
             <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
               <span style={{fontSize:11}}>{a?.avatar}</span>
-              <span style={{color:a?.color,fontWeight:600,fontSize:10,letterSpacing:.5}}>{a?.label?.toUpperCase()}</span>
-              {e.model&&<span style={{color:MODEL_TIERS[e.model]?.color,fontSize:9,background:`${MODEL_TIERS[e.model]?.color}18`,padding:"1px 5px",borderRadius:3}}>{e.model.toUpperCase()}</span>}
+              <span style={{color:a?.color,fontWeight:700,fontSize:10,letterSpacing:.5}}>{a?.label?.toUpperCase()}</span>
+              {e.model&&<span style={{color:MODEL_TIERS[e.model]?.color,fontSize:9,background:`${MODEL_TIERS[e.model]?.color}28`,border:`1px solid ${MODEL_TIERS[e.model]?.color}44`,padding:"1px 5px",borderRadius:3,fontWeight:600}}>{e.model.toUpperCase()}</span>}
               <span style={{color:"var(--text-muted)",fontSize:9,marginLeft:"auto"}}>{new Date(e.ts).toLocaleTimeString()}</span>
             </div>
-            <div style={{color:"var(--text-secondary)",paddingLeft:18,borderLeft:`2px solid ${a?.color||"#333"}${isHighlighted?"88":"28"}`,lineHeight:1.6,transition:"border-color .2s"}}>
-              {isLast&&isRunning?<Typewriter text={e.msg} speed={10} color="#94a3b8"/>:e.msg}
+            <div style={{color:"var(--text-body)",paddingLeft:18,borderLeft:`2px solid ${a?.color||"#333"}${isHighlighted?"cc":"55"}`,lineHeight:1.6,transition:"border-color .2s",fontSize:11}}>
+              {isLast&&isRunning?<Typewriter text={e.msg} speed={10} color="var(--text-body)"/>:e.msg}
             </div>
           </div>
         );
@@ -397,17 +433,7 @@ function ThoughtTrace({entries,isRunning,hoveredAgent}){
   );
 }
 
-// ── Per-agent tool map (unchanged from v6) ────────────────────────────────────
-const AGENT_TOOLS = {
-  planner:      { call:[],               passive:["or"] },
-  research:     { call:["web","arxiv"],  passive:["or"] },
-  execution:    { call:["sql"],          passive:["web","or"] },
-  verification: { call:["or"],           passive:["web","sql"] },
-  memory:       { call:["drive"],        passive:["sql","or"] },
-  report:       { call:["or"],           passive:["drive","web"] },
-};
-
-// ── MCPPanel (unchanged from v6) ─────────────────────────────────────────────
+// ── MCPPanel ──────────────────────────────────────────────────────────────────
 function MCPPanel({active,pulsing,activeAgent}){
   const tools=[
     {id:"web",   name:"tavily",     icon:"🌐", color:"#38bdf8"},
@@ -460,7 +486,7 @@ function MCPPanel({active,pulsing,activeAgent}){
   );
 }
 
-// ── RightPanel (unchanged from v6) ───────────────────────────────────────────
+// ── RightPanel ────────────────────────────────────────────────────────────────
 function RightPanel({entries,activeModel,stats,tokenCounts,isRunning,memRef,agentTokens}){
   const [tab,setTab]=useState("memory");
   const tiers=["Short-Term","Long-Term","Experience Store"],cols=["#818cf8","#a78bfa","#c084fc"];
@@ -508,14 +534,14 @@ function RightPanel({entries,activeModel,stats,tokenCounts,isRunning,memRef,agen
               </div>
             </div>
             {isHyperEfficient&&(
-              <div style={{marginBottom:10,padding:"7px 10px",borderRadius:8,background:"linear-gradient(135deg,rgba(52,211,153,0.08),rgba(99,102,241,0.08))",border:"1px solid rgba(52,211,153,0.3)",display:"flex",alignItems:"center",gap:7,boxShadow:"0 0 16px rgba(52,211,153,0.1)",animation:"fadeSlideIn .4s ease"}}>
+              <div style={{marginBottom:10,padding:"7px 10px",borderRadius:8,background:"linear-gradient(135deg,rgba(52,211,153,0.08),rgba(99,102,241,0.08))",border:"1px solid rgba(52,211,153,0.3)",display:"flex",alignItems:"center",gap:7,animation:"fadeSlideIn .4s ease"}}>
                 <span style={{animation:"float 2s ease-in-out infinite"}}>⚡</span>
                 <div style={{flex:1}}><div style={{color:"#34d399",fontSize:9,fontWeight:700,fontFamily:"monospace",letterSpacing:.5}}>HYPER-EFFICIENT</div><div style={{color:"#4ade80",fontSize:8,fontFamily:"monospace"}}>{savePct}% cheaper vs all-Frontier</div></div>
                 <div style={{width:7,height:7,borderRadius:"50%",background:"#34d399",boxShadow:"0 0 8px #34d399",animation:"breathe 1s infinite"}}/>
               </div>
             )}
             {Object.entries(MODEL_TIERS).map(([key,tier])=>{const on=activeModel===key,count=stats[key]||0,pct=total>0?Math.round(count/total*100):0,tokens=tokenCounts[key]||0,cost=tokens*tier.costPer1k/1000;return(
-              <div key={key} style={{marginBottom:6,padding:"6px 8px",borderRadius:8,background:on?`${tier.color}10`:"transparent",border:`1px solid ${on?tier.color+"44":"transparent"}`,transition:"all .3s",boxShadow:on?`0 0 12px ${tier.color}12`:"none"}}>
+              <div key={key} style={{marginBottom:6,padding:"6px 8px",borderRadius:8,background:on?`${tier.color}10`:"transparent",border:`1px solid ${on?tier.color+"44":"transparent"}`,transition:"all .3s"}}>
                 <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:count>0?4:0}}>
                   <div style={{width:6,height:6,borderRadius:"50%",background:tier.color,boxShadow:on?`0 0 8px ${tier.color}`:"none",animation:on?"breathe 1s infinite":"none"}}/>
                   <span style={{color:tier.color,fontSize:9,fontWeight:700,fontFamily:"monospace",width:52}}>{tier.label}</span>
@@ -555,8 +581,8 @@ function RightPanel({entries,activeModel,stats,tokenCounts,isRunning,memRef,agen
                     </div>
                   </div>
                   <div style={{position:"relative",height:14,background:"var(--bg-card)",borderRadius:3,border:"1px solid rgba(255,255,255,0.03)",marginBottom:2}}>
-                    <div style={{position:"absolute",left:0,width:`${frontierPct}%`,height:"100%",background:"rgba(244,114,182,0.15)",borderRadius:3,border:"1px solid rgba(244,114,182,0.15)"}}/>
-                    {hasData&&<div style={{position:"absolute",left:0,width:`${actualPct}%`,height:"100%",background:`linear-gradient(90deg,${d.color}70,${d.color}cc)`,borderRadius:3,boxShadow:`0 0 6px ${d.color}44`,transition:"width .6s ease",minWidth:hasData?4:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4}}>{actualPct>15&&<span style={{color:"#fff",fontSize:7,fontFamily:"monospace",fontWeight:700}}>${d.actual.toFixed(5)}</span>}</div>}
+                    <div style={{position:"absolute",left:0,width:`${frontierPct}%`,height:"100%",background:"rgba(244,114,182,0.15)",borderRadius:3}}/>
+                    {hasData&&<div style={{position:"absolute",left:0,width:`${actualPct}%`,height:"100%",background:`linear-gradient(90deg,${d.color}70,${d.color}cc)`,borderRadius:3,boxShadow:`0 0 6px ${d.color}44`,transition:"width .6s ease",minWidth:4,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4}}>{actualPct>15&&<span style={{color:"#fff",fontSize:7,fontFamily:"monospace",fontWeight:700}}>${d.actual.toFixed(5)}</span>}</div>}
                     {!hasData&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",paddingLeft:6}}><span style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>waiting…</span></div>}
                   </div>
                 </div>
@@ -576,7 +602,7 @@ function RightPanel({entries,activeModel,stats,tokenCounts,isRunning,memRef,agen
   );
 }
 
-// ── TimelineView (unchanged from v6) ─────────────────────────────────────────
+// ── TimelineView ──────────────────────────────────────────────────────────────
 function TimelineView({timings,totalMs,agentTokens}){
   if(!timings.length)return null;
   const totalSec=(totalMs/1000).toFixed(1);
@@ -624,7 +650,7 @@ function TimelineView({timings,totalMs,agentTokens}){
   );
 }
 
-// ── GoalHistory (unchanged from v6) ──────────────────────────────────────────
+// ── GoalHistory ───────────────────────────────────────────────────────────────
 function GoalHistory({history,onSelect}){
   const [open,setOpen]=useState(false);if(!history.length)return null;
   return (
@@ -639,7 +665,7 @@ function GoalHistory({history,onSelect}){
   );
 }
 
-// ── ApprovalGate (unchanged from v6) ─────────────────────────────────────────
+// ── ApprovalGate ──────────────────────────────────────────────────────────────
 function ApprovalGate({verificationOutput,score,onApprove,onReject,onSteer}){
   const [steer,setSteer]=useState(""),[show,setShow]=useState(false),[vis,setVis]=useState(false),[blink,setBlink]=useState(true),[closing,setClosing]=useState(false);
   useEffect(()=>{setTimeout(()=>setVis(true),40);},[]);
@@ -668,7 +694,7 @@ function ApprovalGate({verificationOutput,score,onApprove,onReject,onSteer}){
                 <div style={{color:"var(--text-muted)",marginBottom:4,fontSize:10}}><span style={{color:"#34d399"}}>chainmind</span><span style={{color:"var(--text-dim)"}}>@</span><span style={{color:"#38bdf8"}}>gate</span><span style={{color:"var(--text-dim)"}}>:~$ </span><span style={{color:"var(--text-muted)"}}>steer --mode=constrained</span></div>
                 <div style={{display:"flex",alignItems:"flex-start",gap:6}}>
                   <span style={{color:"#a78bfa",flexShrink:0,lineHeight:"20px"}}>❯</span>
-                  <textarea value={steer} onChange={e=>setSteer(e.target.value)} placeholder="e.g. ignore claim #2, focus only on peer-reviewed sources..." rows={3} autoFocus style={{flex:1,background:"transparent",border:"none",color:"var(--text-body)",fontFamily:"'DM Mono',monospace",fontSize:12,resize:"none",outline:"none",lineHeight:1.6,caretColor:"#a78bfa"}}/>
+                  <textarea value={steer} onChange={e=>setSteer(e.target.value)} placeholder="e.g. Reassign ML tasks to Aarav, note Meera is overloaded..." rows={3} autoFocus style={{flex:1,background:"transparent",border:"none",color:"var(--text-body)",fontFamily:"'DM Mono',monospace",fontSize:12,resize:"none",outline:"none",lineHeight:1.6,caretColor:"#a78bfa"}}/>
                 </div>
                 {!steer&&<div style={{color:"var(--text-muted)",fontSize:10,marginTop:4,display:"flex",alignItems:"center",gap:4}}><span style={{opacity:blink?1:0,color:"#a78bfa"}}>▌</span><span style={{color:"#2a2a40"}}>type instruction and press Submit</span></div>}
               </div>
@@ -686,7 +712,7 @@ function ApprovalGate({verificationOutput,score,onApprove,onReject,onSteer}){
   );
 }
 
-// ── FinalReport (unchanged from v6) ──────────────────────────────────────────
+// ── FinalReport ───────────────────────────────────────────────────────────────
 function FinalReport({reportText,elapsed,tokenCounts,timings,agentTokens}){
   const [copied,setCopied]=useState(false);const totalMs=timings.reduce((s,t)=>s+t.duration,0);
   const copy=()=>{navigator.clipboard.writeText(reportText);setCopied(true);setTimeout(()=>setCopied(false),2000);};
@@ -726,11 +752,7 @@ function FinalReport({reportText,elapsed,tokenCounts,timings,agentTokens}){
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// v9 NEW COMPONENTS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// ── ProviderSelector (v9 new) ─────────────────────────────────────────────────
+// ── ProviderSelector ──────────────────────────────────────────────────────────
 function ProviderSelector(){
   const [selected,setSelected]=useState("openrouter");
   const [open,setOpen]=useState(false);
@@ -763,14 +785,13 @@ function ProviderSelector(){
   );
 }
 
-// ── ProjectSelector (v9 new) ──────────────────────────────────────────────────
+// ── ProjectSelector ───────────────────────────────────────────────────────────
 function ProjectSelector({onSelect,selectedId}){
   const [tab,setTab]=useState("project");
-  const [customGoal,setCustomGoal]=useState("");
   const [focused,setFocused]=useState(false);
   const priorityColor=(p)=>p==="High"?"#f87171":p==="Medium"?"#fbbf24":"#34d399";
   return(
-    <div style={{width:"100%",maxWidth:700}}>
+    <div style={{width:"100%"}}>
       <div style={{display:"flex",gap:4,marginBottom:12,background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,padding:4}}>
         {[{id:"project",label:"📋 Select Project"},{id:"custom",label:"✏️ Custom Goal"}].map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:"8px 0",background:tab===t.id?"rgba(124,58,237,0.15)":"transparent",border:tab===t.id?"1px solid rgba(124,58,237,0.4)":"1px solid transparent",borderRadius:7,color:tab===t.id?"#a78bfa":"#64748b",fontSize:11,fontFamily:"monospace",fontWeight:600,cursor:"pointer",transition:"all .2s"}}>{t.label}</button>
@@ -781,17 +802,17 @@ function ProjectSelector({onSelect,selectedId}){
           {PROJECTS.map(p=>{
             const isSelected=selectedId===p.id;
             return(
-              <button key={p.id} onClick={()=>onSelect(p)} style={{textAlign:"left",background:isSelected?"rgba(124,58,237,0.12)":"var(--bg-card)",border:`1px solid ${isSelected?"rgba(124,58,237,0.5)":"var(--border)"}`,borderRadius:10,padding:"12px 14px",cursor:"pointer",transition:"all .2s",boxShadow:isSelected?"0 0 20px rgba(124,58,237,0.15)":"none"}} onMouseEnter={e=>{if(!isSelected){e.currentTarget.style.borderColor="rgba(124,58,237,0.3)";e.currentTarget.style.background="rgba(124,58,237,0.06)";}}} onMouseLeave={e=>{if(!isSelected){e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--bg-card)";}}} >
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:5}}>
-                  <span style={{color:isSelected?"#a78bfa":"#475569",fontSize:9,fontFamily:"monospace",fontWeight:700}}>{p.id}</span>
-                  <span style={{background:`${priorityColor(p.priority)}18`,border:`1px solid ${priorityColor(p.priority)}44`,borderRadius:4,padding:"1px 6px",fontSize:7,color:priorityColor(p.priority),fontFamily:"monospace",fontWeight:700}}>{p.priority}</span>
+              <button key={p.id} onClick={()=>onSelect(p)} style={{textAlign:"left",background:isSelected?"rgba(124,58,237,0.12)":"var(--bg-card)",border:`1px solid ${isSelected?"rgba(124,58,237,0.5)":"var(--border)"}`,borderRadius:10,padding:"10px 12px",cursor:"pointer",transition:"all .2s",boxShadow:isSelected?"0 0 20px rgba(124,58,237,0.15)":"none"}} onMouseEnter={e=>{if(!isSelected){e.currentTarget.style.borderColor="rgba(124,58,237,0.3)";e.currentTarget.style.background="rgba(124,58,237,0.06)";}}} onMouseLeave={e=>{if(!isSelected){e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--bg-card)";}}} >
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+                  <span style={{color:isSelected?"#a78bfa":"#475569",fontSize:8,fontFamily:"monospace",fontWeight:700}}>{p.id}</span>
+                  <span style={{background:`${priorityColor(p.priority)}18`,border:`1px solid ${priorityColor(p.priority)}44`,borderRadius:4,padding:"1px 5px",fontSize:7,color:priorityColor(p.priority),fontFamily:"monospace",fontWeight:700}}>{p.priority}</span>
                 </div>
-                <div style={{color:isSelected?"#f1f5f9":"#94a3b8",fontSize:11,fontWeight:700,marginBottom:4,fontFamily:"monospace"}}>{p.name}</div>
-                <div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",lineHeight:1.5,marginBottom:6}}>{p.desc}</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:4}}>
-                  {p.skills.map(s=>(<span key={s} style={{background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.2)",borderRadius:3,padding:"1px 5px",fontSize:7,color:"#818cf8",fontFamily:"monospace"}}>{s}</span>))}
+                <div style={{color:isSelected?"#f1f5f9":"#94a3b8",fontSize:10,fontWeight:700,marginBottom:3,fontFamily:"monospace"}}>{p.name}</div>
+                <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",lineHeight:1.4,marginBottom:5}}>{p.desc}</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+                  {p.skills.map(s=>(<span key={s} style={{background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.2)",borderRadius:3,padding:"1px 4px",fontSize:7,color:"#818cf8",fontFamily:"monospace"}}>{s}</span>))}
                 </div>
-                <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>⏱ {p.deadline} days deadline</div>
+                <div style={{color:"var(--text-muted)",fontSize:7,fontFamily:"monospace",marginTop:4}}>⏱ {p.deadline}d · {p.priority}</div>
               </button>
             );
           })}
@@ -799,16 +820,15 @@ function ProjectSelector({onSelect,selectedId}){
       )}
       {tab==="custom"&&(
         <div style={{position:"relative",borderRadius:14,overflow:"hidden",border:`1px solid ${focused?"#7C3AED88":"rgba(255,255,255,0.05)"}`,boxShadow:focused?"0 0 32px rgba(124,58,237,.18)":"none",transition:"all .3s",backdropFilter:"blur(20px)"}}>
-          <textarea value={customGoal} onChange={e=>{setCustomGoal(e.target.value);onSelect({id:"custom",name:"Custom Goal",desc:e.target.value,skills:[],deadline:0,priority:"Medium"});}} onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)} placeholder="Describe your project goal… e.g. 'Build a recommendation engine for our e-commerce platform'" rows={4} style={{width:"100%",background:"var(--bg-input)",border:"none",padding:"16px 18px",color:"var(--text-body)",fontFamily:"'DM Mono',monospace",fontSize:13,lineHeight:1.7,resize:"none",outline:"none",boxSizing:"border-box"}}/>
+          <textarea onChange={e=>onSelect({id:"custom",name:"Custom Goal",desc:e.target.value,skills:[],deadline:0,priority:"Medium"})} onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)} placeholder="Describe your project goal…" rows={4} style={{width:"100%",background:"var(--bg-input)",border:"none",padding:"14px 16px",color:"var(--text-body)",fontFamily:"'DM Mono',monospace",fontSize:12,lineHeight:1.7,resize:"none",outline:"none",boxSizing:"border-box"}}/>
         </div>
       )}
     </div>
   );
 }
 
-// ── WorkloadChart (v4 new) ────────────────────────────────────────────────────
+// ── WorkloadChart ─────────────────────────────────────────────────────────────
 function WorkloadChart({employees}){
-  const max=100;
   return(
     <div style={{padding:"10px 18px",borderBottom:"1px solid var(--border-subtle)",flexShrink:0}}>
       <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:2,marginBottom:8}}>TEAM WORKLOAD</div>
@@ -827,7 +847,6 @@ function WorkloadChart({employees}){
               </div>
             </div>
             <div style={{height:4,background:"var(--bg-track)",borderRadius:2,overflow:"hidden",position:"relative"}}>
-              {/* baseline ghost bar */}
               {def&&<div style={{position:"absolute",left:0,width:`${def.workload}%`,height:"100%",background:"rgba(255,255,255,0.06)",borderRadius:2}}/>}
               <div style={{height:"100%",width:`${emp.workload}%`,background:`linear-gradient(90deg,${wColor}88,${wColor})`,borderRadius:2,transition:"width .6s ease",boxShadow:emp.workload>=80?`0 0 6px ${wColor}`:"none"}}/>
             </div>
@@ -838,7 +857,7 @@ function WorkloadChart({employees}){
   );
 }
 
-// ── AssignmentHistory (v4 new) ────────────────────────────────────────────────
+// ── AssignmentHistoryPanel ────────────────────────────────────────────────────
 function AssignmentHistoryPanel({history}){
   if(!history.length) return(
     <div style={{padding:"10px 18px",borderBottom:"1px solid var(--border-subtle)",flexShrink:0}}>
@@ -867,16 +886,16 @@ function AssignmentHistoryPanel({history}){
   );
 }
 
-// ── EmployeeSidebar (v4: workload persistence, chart, history, overload, reset) ──
+// ── EmployeeSidebar ───────────────────────────────────────────────────────────
 function EmployeeSidebar({open,onClose,assignments,employees,onResetWorkloads,assignmentHistory}){
   return(
     <>
-      {open&&<div onClick={onClose} style={{position:"fixed",inset:0,zIndex:299,background:"var(--bg-hover)"}}/>}
+      {open&&<div onClick={onClose} style={{position:"fixed",inset:0,zIndex:299,background:"rgba(0,0,0,0.3)"}}/>}
       <div style={{position:"fixed",top:0,right:0,bottom:0,width:320,zIndex:300,background:"var(--bg-sidebar)",borderLeft:"1px solid var(--border)",backdropFilter:"blur(24px)",transform:open?"translateX(0)":"translateX(100%)",transition:"transform .3s cubic-bezier(.4,0,.2,1)",display:"flex",flexDirection:"column",boxShadow:open?"-8px 0 40px rgba(0,0,0,0.5)":"none"}}>
         <div style={{padding:"16px 18px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
           <div><div style={{color:"var(--text-primary)",fontSize:13,fontWeight:700,fontFamily:"monospace"}}>👥 Team</div><div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",letterSpacing:1,marginTop:2}}>{employees.length} MEMBERS</div></div>
           <div style={{display:"flex",gap:6,alignItems:"center"}}>
-            <button onClick={onResetWorkloads} style={{background:"rgba(248,113,113,0.08)",border:"1px solid rgba(248,113,113,0.2)",borderRadius:7,padding:"4px 8px",color:"#f87171",cursor:"pointer",fontSize:8,fontFamily:"monospace",whiteSpace:"nowrap"}} title="Reset all workloads to defaults">↺ Reset</button>
+            <button onClick={onResetWorkloads} style={{background:"rgba(248,113,113,0.08)",border:"1px solid rgba(248,113,113,0.2)",borderRadius:7,padding:"4px 8px",color:"#f87171",cursor:"pointer",fontSize:8,fontFamily:"monospace",whiteSpace:"nowrap"}}>↺ Reset</button>
             <button onClick={onClose} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:7,width:28,height:28,color:"var(--text-dim)",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
           </div>
         </div>
@@ -933,67 +952,216 @@ function EmployeeSidebar({open,onClose,assignments,employees,onResetWorkloads,as
   );
 }
 
-// ── Landing (v4) ──
+// ── Landing — FULL SCREEN TWO-COLUMN ─────────────────────────────────────────
+
+// ── Landing — WIREFRAME LAYOUT: goal input left, live agent pipeline right ────
 function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,onToggleSidebar,assignments,employeeCount,darkMode,toggleTheme}){
   return (
-    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 24px",position:"relative",zIndex:1}}>
-      <div style={{textAlign:"center",marginBottom:36,animation:"fadeSlideIn .6s ease",width:"100%",maxWidth:700}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:24}}>
-          <div style={{display:"inline-flex",alignItems:"center",gap:14}}>
-            <div style={{width:56,height:56,borderRadius:18,background:"linear-gradient(135deg,rgba(124,58,237,.28),rgba(14,165,233,.28))",border:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,boxShadow:"0 0 48px rgba(124,58,237,.38)",animation:"float 3s ease-in-out infinite",backdropFilter:"blur(20px)"}}>⛓</div>
-            <div style={{textAlign:"left"}}>
-              <div style={{color:"var(--text-primary)",fontWeight:800,fontSize:28,letterSpacing:"-1px"}}>ChainMind</div>
-              <div style={{color:"var(--text-muted)",fontSize:11,fontFamily:"monospace",letterSpacing:2}}>MULTI-AGENT ORCHESTRATION FRAMEWORK</div>
-            </div>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <button onClick={onToggleSidebar} style={{display:"flex",alignItems:"center",gap:7,background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:8,padding:"7px 12px",cursor:"pointer",color:"var(--text-dim)",fontSize:11,fontFamily:"monospace",transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#7C3AED55";e.currentTarget.style.color="#94a3b8";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255,255,255,0.06)";e.currentTarget.style.color="#475569";}}>
-              👥 Team <span style={{background:"rgba(124,58,237,0.15)",border:"1px solid rgba(124,58,237,0.3)",borderRadius:10,padding:"1px 6px",color:"#a78bfa",fontSize:9,marginLeft:2}}>{employeeCount}</span>
-            </button>
-            <ProviderSelector/>
-            <button onClick={toggleTheme} title={darkMode?"Switch to Light Mode":"Switch to Dark Mode"} style={{background:darkMode?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.06)",border:`1px solid ${darkMode?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.1)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",display:"flex",alignItems:"center",gap:6,transition:"all .3s"}}>
-              <span style={{fontSize:13}}>{darkMode?"☀️":"🌙"}</span>
-              <span style={{fontSize:9,fontFamily:"monospace",color:darkMode?"#64748b":"#475569",letterSpacing:.5}}>{darkMode?"LIGHT":"DARK"}</span>
-            </button>
+    <div style={{
+      position:"relative",zIndex:1,
+      width:"100vw",height:"100vh",
+      display:"flex",flexDirection:"column",
+      overflow:"hidden",
+    }}>
+      {/* ── TOP NAV BAR ──────────────────────────────────────────────────── */}
+      <div style={{
+        flexShrink:0,
+        display:"flex",alignItems:"center",justifyContent:"space-between",
+        padding:"0 32px",height:56,
+        borderBottom:"1px solid var(--border)",
+        background:"var(--bg-header)",
+        backdropFilter:"blur(32px)",
+        zIndex:10,
+      }}>
+        {/* Logo */}
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div style={{width:34,height:34,borderRadius:10,background:"linear-gradient(135deg,rgba(124,58,237,.3),rgba(14,165,233,.3))",border:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,boxShadow:"0 0 24px rgba(124,58,237,.35)",animation:"float 3s ease-in-out infinite"}}>⛓</div>
+          <div>
+            <div style={{color:"var(--text-primary)",fontWeight:800,fontSize:16,letterSpacing:"-0.5px",lineHeight:1}}>ChainMind</div>
+            <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:2}}>AI ORCHESTRATOR</div>
           </div>
         </div>
-        <div style={{fontSize:38,fontWeight:800,color:"var(--text-primary)",letterSpacing:"-2px",lineHeight:1.08,marginBottom:14}}>
-          The only agent system<br/>that <span style={{background:"linear-gradient(135deg,#fbbf24,#f472b6)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>stops and asks you</span><br/>before it's too late.
-        </div>
-        <div style={{color:"var(--text-muted)",fontSize:13,fontFamily:"'DM Mono',monospace",maxWidth:500,margin:"0 auto",lineHeight:1.9}}>
-          Every other pipeline is a black box. ChainMind has a<br/>
-          <span style={{color:"#fbbf24"}}>Conditional Approval Gate</span> — a hard stop where a human<br/>
-          reviews confidence scores, steers the output, or kills the run.
+
+        {/* Nav right */}
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <button onClick={onToggleSidebar} style={{display:"flex",alignItems:"center",gap:6,background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:8,padding:"5px 12px",cursor:"pointer",color:"var(--text-dim)",fontSize:10,fontFamily:"monospace",transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#7C3AED55";e.currentTarget.style.color="#94a3b8";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.color="var(--text-dim)";}}>
+            👥 Team
+            <span style={{background:"rgba(124,58,237,0.15)",border:"1px solid rgba(124,58,237,0.3)",borderRadius:8,padding:"1px 5px",color:"#a78bfa",fontSize:8,marginLeft:2}}>{employeeCount}</span>
+          </button>
+          <ProviderSelector/>
+          <button onClick={toggleTheme} style={{background:darkMode?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.06)",border:`1px solid ${darkMode?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.1)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",display:"flex",alignItems:"center",gap:6,transition:"all .3s"}}>
+            <span style={{fontSize:13}}>{darkMode?"☀️":"🌙"}</span>
+            <span style={{fontSize:9,fontFamily:"monospace",color:darkMode?"#64748b":"#475569"}}>{darkMode?"LIGHT":"DARK"}</span>
+          </button>
         </div>
       </div>
-      <div style={{marginBottom:36,animation:"fadeSlideIn .7s ease",width:"100%",maxWidth:700,display:"flex",justifyContent:"center"}}><MiniPreview/></div>
-      {!apiConfigured&&<div style={{background:"rgba(251,191,36,.06)",border:"1px solid rgba(251,191,36,.25)",borderRadius:10,padding:"10px 16px",marginBottom:18,maxWidth:700,width:"100%",fontSize:11,fontFamily:"monospace",color:"#fbbf24"}}>⚠ Add VITE_OPENROUTER_KEY to .env to enable real AI responses</div>}
-      {apiConfigured&&<div style={{background:"rgba(52,211,153,.06)",border:"1px solid rgba(52,211,153,.25)",borderRadius:10,padding:"9px 16px",marginBottom:18,maxWidth:700,width:"100%",fontSize:11,fontFamily:"monospace",color:"#34d399"}}>✓ OpenRouter connected · Real AI enabled</div>}
-      <div style={{width:"100%",maxWidth:700,animation:"fadeSlideIn .8s ease"}}>
-        <GoalHistory history={history} onSelect={goal=>onSelectProject({id:"custom",name:"Custom Goal",desc:goal,skills:[],deadline:0,priority:"Medium"})}/>
-        <ProjectSelector onSelect={onSelectProject} selectedId={selectedProject?.id}/>
-        <div style={{marginTop:14,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
-          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+
+      {/* ── MAIN BODY: two columns ────────────────────────────────────────── */}
+      <div style={{flex:1,display:"grid",gridTemplateColumns:"1fr 1fr",overflow:"hidden"}}>
+
+        {/* ── LEFT: Goal Input ──────────────────────────────────────────── */}
+        <div style={{
+          display:"flex",flexDirection:"column",
+          padding:"36px 40px",
+          borderRight:"1px solid var(--border)",
+          overflowY:"auto",
+          background:"var(--bg-base)",
+        }}>
+          {/* Section label */}
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:20}}>
+            <div style={{width:5,height:5,borderRadius:"50%",background:"#a78bfa",boxShadow:"0 0 6px #7C3AED"}}/>
+            <span style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",letterSpacing:2}}>GOAL INPUT</span>
+          </div>
+
+          {/* Headline */}
+          <div style={{fontSize:36,fontWeight:800,color:"var(--text-primary)",letterSpacing:"-2px",lineHeight:1.06,marginBottom:14}}>
+            The only system<br/>
+            that <span style={{background:"linear-gradient(135deg,#fbbf24,#f472b6)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>stops and asks</span><br/>
+            before it's too late.
+          </div>
+          <div style={{color:"var(--text-muted)",fontSize:12,fontFamily:"'DM Mono',monospace",lineHeight:1.8,marginBottom:28}}>
+            Six agents. Three model tiers. One{" "}
+            <span style={{color:"#fbbf24"}}>Conditional Gate</span>{" "}
+            that pauses for human review.
+          </div>
+
+          {/* API badge */}
+          {!apiConfigured&&<div style={{background:"rgba(251,191,36,.06)",border:"1px solid rgba(251,191,36,.25)",borderRadius:8,padding:"7px 12px",marginBottom:16,fontSize:10,fontFamily:"monospace",color:"#fbbf24"}}>⚠ Add VITE_OPENROUTER_KEY to .env</div>}
+          {apiConfigured&&<div style={{background:"rgba(52,211,153,.06)",border:"1px solid rgba(52,211,153,.25)",borderRadius:8,padding:"7px 12px",marginBottom:16,fontSize:10,fontFamily:"monospace",color:"#34d399"}}>✓ OpenRouter connected · Real AI enabled</div>}
+
+          {/* Goal history */}
+          <GoalHistory history={history} onSelect={goal=>onSelectProject({id:"custom",name:"Custom Goal",desc:goal,skills:[],deadline:0,priority:"Medium"})}/>
+
+          {/* Project selector */}
+          <ProjectSelector onSelect={onSelectProject} selectedId={selectedProject?.id}/>
+
+          {/* Sample prompts */}
+          <div style={{display:"flex",gap:6,marginTop:12,flexWrap:"wrap"}}>
             {SAMPLE_GOALS.slice(0,2).map((sg,i)=>(
-              <button key={i} onClick={()=>onSelectProject({id:"custom",name:"Custom Goal",desc:sg,skills:[],deadline:0,priority:"Medium"})} style={{background:"var(--bg-card)",border:"1px solid var(--border-subtle)",borderRadius:8,padding:"5px 12px",color:"var(--text-muted)",fontSize:10,fontFamily:"monospace",cursor:"pointer",backdropFilter:"blur(8px)",transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#7C3AED55";e.currentTarget.style.color="#94a3b8";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255,255,255,0.04)";e.currentTarget.style.color="#64748b";}}>
+              <button key={i} onClick={()=>onSelectProject({id:"custom",name:"Custom Goal",desc:sg,skills:[],deadline:0,priority:"Medium"})}
+                style={{flex:1,textAlign:"left",background:"var(--bg-card)",border:"1px solid var(--border-subtle)",borderRadius:7,padding:"6px 10px",color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",cursor:"pointer",transition:"all .2s"}}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor="#7C3AED55";e.currentTarget.style.color="#94a3b8";}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border-subtle)";e.currentTarget.style.color="var(--text-muted)";}}>
                 {sg.substring(0,42)}…
               </button>
             ))}
           </div>
-          {selectedProject&&(
-            <button onClick={onStart} style={{background:"linear-gradient(135deg,#7C3AED,#0EA5E9)",border:"none",borderRadius:9,color:"#fff",padding:"10px 24px",cursor:"pointer",fontWeight:700,fontSize:13,boxShadow:"0 0 22px rgba(124,58,237,.48)",animation:"fadeIn .2s ease",whiteSpace:"nowrap",flexShrink:0}}>▶ Execute</button>
-          )}
+
+          {/* Run Workflow button */}
+          <div style={{marginTop:20}}>
+            <button
+              onClick={selectedProject?onStart:undefined}
+              style={{
+                width:"100%",padding:"14px 0",
+                background:selectedProject?"linear-gradient(135deg,#7C3AED,#0EA5E9)":"var(--bg-card)",
+                border:selectedProject?"none":`1px solid var(--border)`,
+                borderRadius:10,color:selectedProject?"#fff":"var(--text-muted)",
+                fontWeight:800,fontSize:14,fontFamily:"monospace",letterSpacing:.5,
+                cursor:selectedProject?"pointer":"default",
+                boxShadow:selectedProject?"0 0 32px rgba(124,58,237,.5)":"none",
+                transition:"all .25s",
+                opacity:selectedProject?1:0.5,
+              }}
+              onMouseEnter={e=>{if(selectedProject){e.currentTarget.style.boxShadow="0 0 52px rgba(124,58,237,.75)";e.currentTarget.style.transform="translateY(-2px)";}}}
+              onMouseLeave={e=>{e.currentTarget.style.boxShadow=selectedProject?"0 0 32px rgba(124,58,237,.5)":"none";e.currentTarget.style.transform="translateY(0)";}}>
+              {selectedProject?"▶ Run Workflow":"← Select a project to begin"}
+            </button>
+          </div>
+
+          {/* Stat bar pinned to bottom */}
+          <div style={{marginTop:"auto",paddingTop:28,borderTop:"1px solid var(--border-subtle)",display:"flex",gap:28}}>
+            {[["6","Agents","#a78bfa"],["3","Model Tiers","#34d399"],["Gate","Approval","#fbbf24"],["57%","Cost Saved","#f472b6"]].map(([val,label,color])=>(
+              <div key={label}>
+                <div style={{color,fontSize:22,fontWeight:800,fontFamily:"monospace",lineHeight:1}}>{val}</div>
+                <div style={{color:"var(--text-muted)",fontSize:7,fontFamily:"monospace",letterSpacing:1.5,marginTop:3}}>{label.toUpperCase()}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── RIGHT: Live Agent Workflow ────────────────────────────────── */}
+        <div style={{
+          display:"flex",flexDirection:"column",
+          padding:"36px 36px",
+          background:darkMode?"rgba(3,3,12,0.55)":"rgba(240,242,250,0.55)",
+          overflowY:"auto",
+          position:"relative",
+        }}>
+          {/* Soft glow behind */}
+          <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse at 60% 40%,rgba(124,58,237,0.07) 0%,transparent 65%)",pointerEvents:"none"}}/>
+
+          {/* Section label */}
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:20,position:"relative",zIndex:1}}>
+            <div style={{width:5,height:5,borderRadius:"50%",background:"#34d399",boxShadow:"0 0 6px #10B981",animation:"breathe 1.4s infinite"}}/>
+            <span style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",letterSpacing:2}}>LIVE AGENT WORKFLOW</span>
+            <span style={{marginLeft:"auto",color:"#34d399",fontSize:9,fontFamily:"monospace"}}>PL → RE → EX → VE → ME → RP</span>
+          </div>
+
+          {/* MiniPreview — the live orchestration widget */}
+          <div style={{position:"relative",zIndex:1,marginBottom:20}}>
+            <MiniPreview/>
+          </div>
+
+          {/* Agent pipeline cards — static representation */}
+          <div style={{position:"relative",zIndex:1,display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",letterSpacing:2,marginBottom:4}}>PIPELINE STAGES</div>
+            {WORKFLOW.map((w,i)=>{
+              const a=AGENTS[w.agent];
+              const tier=MODEL_TIERS[w.model];
+              const initials=["PL","RE","EX","VE","ME","RP"][i];
+              return(
+                <div key={w.agent} style={{
+                  display:"flex",alignItems:"center",gap:12,
+                  padding:"10px 14px",borderRadius:10,
+                  background:"var(--bg-card)",border:"1px solid var(--border)",
+                  backdropFilter:"blur(20px)",
+                  transition:"all .2s",
+                  animation:`fadeSlideIn .4s ease ${i*0.07}s both`,
+                }}>
+                  <div style={{width:32,height:32,borderRadius:9,background:a.bg,border:`1px solid ${a.color}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,fontFamily:"monospace",color:a.color,flexShrink:0}}>{initials}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{color:"var(--text-secondary)",fontSize:11,fontWeight:700}}>{a.label} Agent</div>
+                    <div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{w.task}</div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                    <span style={{background:`${tier.color}18`,border:`1px solid ${tier.color}44`,borderRadius:4,padding:"2px 6px",fontSize:8,color:tier.color,fontFamily:"monospace",fontWeight:700}}>{tier.label}</span>
+                    {i<WORKFLOW.length-1&&<span style={{color:"var(--text-muted)",fontSize:10,fontFamily:"monospace"}}>→</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Feature chips at bottom */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginTop:16,position:"relative",zIndex:1}}>
+            {[
+              {icon:"🛡",label:"Conditional Gate",   desc:"Human review before risky ops"},
+              {icon:"💾",label:"Tripartite Memory",  desc:"Short, long & experience tiers"},
+              {icon:"⚡",label:"Cost-Aware Routing", desc:"57% cheaper than all-Frontier"},
+              {icon:"🌐",label:"Live Web Search",    desc:"Tavily real-time retrieval"},
+            ].map(f=>(
+              <div key={f.label} style={{display:"flex",alignItems:"flex-start",gap:9,padding:"9px 11px",borderRadius:9,background:"var(--bg-card)",border:"1px solid var(--border)",backdropFilter:"blur(20px)"}}>
+                <span style={{fontSize:14,flexShrink:0,marginTop:1}}>{f.icon}</span>
+                <div>
+                  <div style={{color:"var(--text-primary)",fontSize:9,fontWeight:700,fontFamily:"monospace"}}>{f.label}</div>
+                  <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",marginTop:1}}>{f.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
+
+      {/* ── RESPONSIVE: hide right col on small screens ───────────────────── */}
+      <style>{`@media(max-width:860px){.landing-right{display:none!important;}div[style*="gridTemplateColumns: 1fr 1fr"]{grid-template-columns:1fr!important;}}`}</style>
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// MAIN APP — v9
+// MAIN APP
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function ChainMind(){
-  // ── All v6 state ──────────────────────────────────────────────────────────
   const [goal,setGoal]=useState("");
   const [phase,setPhase]=useState("idle");
   const [steps,setSteps]=useState([]);
@@ -1016,26 +1184,20 @@ export default function ChainMind(){
   const [timings,setTimings]=useState([]);
   const [history,setHistory]=useState([]);
   const [hoveredAgent,setHoveredAgent]=useState(null);
-
-  // ── v4 new state ──────────────────────────────────────────────────────────
   const [selectedProject,setSelectedProject]=useState(null);
   const [sidebarOpen,setSidebarOpen]=useState(false);
   const [assignments,setAssignments]=useState({});
   const [employees,setEmployees]=useState(loadEmployees);
   const [assignmentHistory,setAssignmentHistory]=useState(loadAssignmentHistory);
   const [skillGapWarning,setSkillGapWarning]=useState(null);
-  const [darkMode,setDarkMode]=useState(()=>{
-    try{ return localStorage.getItem("cm_theme")!=="light"; }catch(e){ return true; }
-  });
+  const [darkMode,setDarkMode]=useState(()=>{try{return localStorage.getItem("cm_theme")!=="light";}catch(e){return true;}});
 
   const t0=useRef(null),live=useRef(false),steerRef=useRef(null);
   const gridRef=useRef(null),agentCardRefs=useRef({}),traceRef=useRef(null),memRef=useRef(null);
   const apiConfigured=!!import.meta.env.VITE_OPENROUTER_KEY;
 
-  // ── Build effective goal from selected project (v4) ───────────────────────
   function buildGoal(project){
     if(!project||project.id==="custom") return project?.desc||"";
-    // Overload protection: mark employees at 80%+ as unavailable to the planner
     const empSummary=employees.map(e=>{
       const status=e.workload>=80?"UNAVAILABLE — overloaded, do not assign":"available";
       return `${e.name} (${e.role}, Skills: ${e.skills.join(", ")}, Workload: ${e.workload}%, Experience: ${e.experience}yr, Status: ${status})`;
@@ -1044,7 +1206,6 @@ export default function ChainMind(){
     return `PROJECT: ${project.name}\nDESCRIPTION: ${project.desc}\nREQUIRED SKILLS: ${project.skills.join(", ")}\nDEADLINE: ${project.deadline} days\nPRIORITY: ${project.priority}\n\nTEAM MEMBERS:\n${empSummary}\n\nPAST PROJECT HISTORY:\n${histSummary}\n\nAnalyse the project requirements, decompose into sub-tasks, and assign each sub-task to the most appropriate team member based on their skills and current workload. Do NOT assign tasks to employees marked UNAVAILABLE.`;
   }
 
-  // ── Parse employee assignments from final report (v4) ────────────────────
   function parseAssignments(reportTxt){
     const result={};
     employees.forEach(emp=>{
@@ -1058,7 +1219,6 @@ export default function ChainMind(){
     return result;
   }
 
-  // ── Skill gap check (v4 new) ─────────────────────────────────────────────
   function checkSkillGap(project){
     if(!project||project.id==="custom"||!project.skills?.length) return null;
     const allSkills=employees.flatMap(e=>e.skills.map(s=>s.toLowerCase()));
@@ -1091,7 +1251,6 @@ export default function ChainMind(){
         else if(idx===5){
           result=await runReport(currentGoal,out.planner||"",out.research||"",out.execution||"",out.verification||"",steerRef.current);
           out.report=result;setReportText(result);
-          // v4: parse assignments, bump workloads, save history
           const parsed=parseAssignments(result);
           setAssignments(parsed);
           if(Object.keys(parsed).length>0){
@@ -1106,11 +1265,8 @@ export default function ChainMind(){
                 return emp;
               });
               saveEmployees(updated);
-              // record assignment history entry
               if(deltas.length>0){
-                const projectName=currentGoal.includes("PROJECT:")
-                  ?currentGoal.split("\n")[0].replace("PROJECT:","").trim()
-                  :currentGoal.substring(0,30);
+                const projectName=currentGoal.includes("PROJECT:")?currentGoal.split("\n")[0].replace("PROJECT:","").trim():currentGoal.substring(0,30);
                 setAssignmentHistory(prev2=>{
                   const newEntry={project:projectName,ts:Date.now(),deltas};
                   const updated2=[...prev2,newEntry].slice(-20);
@@ -1135,13 +1291,13 @@ export default function ChainMind(){
         setTimeout(()=>setProgress(0),300);
         if(idx===3){
           const score=parseConfidenceScore(result);
-          const forceGate=true; // always show gate in demo
+          const forceGate=true;
           if(forceGate||shouldTriggerGate(result)){
             setStepStatus(idx,"gate");
             log("verification",`⚠ Confidence ${score}/100 — Gate triggered — human review required`,"mid");
             setGate({idx,verificationOutput:result,score});
             setPhase("gate");
-            return "gate";
+            return"gate";
           }
         }
         setStepStatus(idx,"done");return"ok";
@@ -1164,13 +1320,8 @@ export default function ChainMind(){
 
   const startRun=useCallback(()=>{
     if(!selectedProject)return;
-    // v4: skill gap check before burning API calls
     const gaps=checkSkillGap(selectedProject);
-    if(gaps){
-      setSkillGapWarning(`Skill gap detected: no team member covers [${gaps.join(", ")}]. Pipeline will still run but assignments may be suboptimal.`);
-    } else {
-      setSkillGapWarning(null);
-    }
+    setSkillGapWarning(gaps?`Skill gap detected: no team member covers [${gaps.join(", ")}]. Pipeline will still run but assignments may be suboptimal.`:null);
     const effectiveGoal=buildGoal(selectedProject);
     if(!effectiveGoal.trim())return;
     live.current=true;t0.current=Date.now();
@@ -1201,6 +1352,15 @@ export default function ChainMind(){
     setAssignments({});setSidebarOpen(false);setSkillGapWarning(null);
   };
 
+  const softReset=()=>{
+    live.current=false;
+    setPhase("idle");setSteps([]);setCurIdx(-1);setTrace([]);setMem([]);setMcp([]);
+    setMStats({slm:0,mid:0,frontier:0});setGate(null);setGuard(null);setProgress(0);
+    setGoal("");setOutputs({});setReportText("");setError(null);setMcpPulsing([]);
+    setTokenCounts({slm:0,mid:0,frontier:0});setAgentTokens({});setTimings([]);
+    setAssignments({});setSkillGapWarning(null);setSelectedProject(null);
+  };
+
   useEffect(()=>{
     const h=(e)=>{if((e.metaKey||e.ctrlKey)&&e.key==="Enter"&&phase==="idle"&&selectedProject)startRun();};
     window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h);
@@ -1208,8 +1368,7 @@ export default function ChainMind(){
 
   const totalCost=Object.entries(tokenCounts).reduce((s,[tier,tok])=>s+(tok*(MODEL_TIERS[tier]?.costPer1k||0)/1000),0);
   const activeAgentKey=curIdx>=0?WORKFLOW[curIdx]?.agent:null;
-
-  const toggleTheme=()=>{ const n=!darkMode; setDarkMode(n); try{ localStorage.setItem("cm_theme",n?"dark":"light"); }catch(e){} };
+  const toggleTheme=()=>{const n=!darkMode;setDarkMode(n);try{localStorage.setItem("cm_theme",n?"dark":"light");}catch(e){}};
 
   return (
     <>
@@ -1234,72 +1393,44 @@ export default function ChainMind(){
         @keyframes float       {0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
         @keyframes ripple      {0%{opacity:0.8;transform:scale(1)}100%{opacity:0;transform:scale(1.4)}}
 
-        /* ── DARK MODE (default) ── */
-        [data-theme="dark"] {
-          --bg-base:       #04040e;
-          --bg-panel:      rgba(3,3,14,0.92);
-          --bg-card:       rgba(8,8,20,0.85);
-          --bg-header:     rgba(3,3,12,0.82);
-          --bg-input:      rgba(6,6,18,0.97);
-          --bg-sidebar:    rgba(6,6,18,0.98);
-          --bg-hover:      rgba(124,58,237,0.08);
-          --bg-track:      #0a0a18;
-          --border:        rgba(255,255,255,0.05);
-          --border-subtle: rgba(255,255,255,0.04);
-          --text-primary:  #f1f5f9;
-          --text-body:     #e2e8f0;
-          --text-secondary:#94a3b8;
-          --text-muted:    #64748b;
-          --text-dim:      #475569;
-          --particle-op:   0.33;
+        [data-theme="dark"]{
+          --bg-base:#04040e;--bg-panel:rgba(3,3,14,0.92);--bg-card:rgba(8,8,20,0.85);
+          --bg-header:rgba(3,3,12,0.82);--bg-input:rgba(6,6,18,0.97);--bg-sidebar:rgba(6,6,18,0.98);
+          --bg-hover:rgba(124,58,237,0.08);--bg-track:#0a0a18;
+          --border:rgba(255,255,255,0.05);--border-subtle:rgba(255,255,255,0.04);
+          --text-primary:#f1f5f9;--text-body:#e2e8f0;--text-secondary:#94a3b8;
+          --text-muted:#64748b;--text-dim:#475569;
         }
-
-        /* ── LIGHT MODE ── */
-        [data-theme="light"] {
-          --bg-base:       #f0f2f8;
-          --bg-panel:      rgba(255,255,255,0.95);
-          --bg-card:       rgba(255,255,255,0.92);
-          --bg-header:     rgba(248,249,252,0.95);
-          --bg-input:      rgba(255,255,255,0.98);
-          --bg-sidebar:    rgba(248,249,252,0.99);
-          --bg-hover:      rgba(124,58,237,0.06);
-          --bg-track:      rgba(230,232,240,0.8);
-          --border:        rgba(0,0,0,0.08);
-          --border-subtle: rgba(0,0,0,0.06);
-          --text-primary:  #0f172a;
-          --text-body:     #1e293b;
-          --text-secondary:#334155;
-          --text-muted:    #475569;
-          --text-dim:      #64748b;
-          --particle-op:   0.12;
+        [data-theme="light"]{
+          --bg-base:#f0f2f8;--bg-panel:rgba(255,255,255,0.95);--bg-card:rgba(255,255,255,0.92);
+          --bg-header:rgba(248,249,252,0.95);--bg-input:rgba(255,255,255,0.98);--bg-sidebar:rgba(248,249,252,0.99);
+          --bg-hover:rgba(124,58,237,0.06);--bg-track:rgba(230,232,240,0.8);
+          --border:rgba(0,0,0,0.08);--border-subtle:rgba(0,0,0,0.06);
+          --text-primary:#0f172a;--text-body:#1e293b;--text-secondary:#334155;
+          --text-muted:#475569;--text-dim:#64748b;
         }
-
-        [data-theme="light"] body { background: #f0f2f8; }
-
-        /* Apply CSS vars to common elements */
-        [data-theme] { background: var(--bg-base); color: var(--text-body); }
-        [data-theme] textarea {
-          background: var(--bg-input) !important;
-          color: var(--text-body) !important;
-          border-color: var(--border) !important;
+        [data-theme="light"] body{background:#f0f2f8;}
+        [data-theme]{background:var(--bg-base);color:var(--text-body);}
+        [data-theme] textarea{background:var(--bg-input)!important;color:var(--text-body)!important;border-color:var(--border)!important;}
+        [data-theme="light"] canvas{opacity:0.1;}
+        @media(max-width:900px){
+          .landing-grid{grid-template-columns:1fr!important;}
+          .landing-right{display:none!important;}
         }
-        [data-theme="light"] canvas { opacity: var(--particle-op); }
       `}</style>
 
       <div data-theme={darkMode?"dark":"light"} style={{minHeight:"100vh",background:"var(--bg-base)",color:"var(--text-body)",fontFamily:"'DM Sans',sans-serif",position:"relative",transition:"background .3s ease,color .3s ease"}}>
         <ParticleCanvas/>
 
-        {/* Employee Sidebar — always rendered so slide animation works */}
         <EmployeeSidebar
           open={sidebarOpen}
           onClose={()=>setSidebarOpen(false)}
           assignments={assignments}
           employees={employees}
           assignmentHistory={assignmentHistory}
-          onResetWorkloads={()=>{ saveEmployees(DEFAULT_EMPLOYEES); setEmployees(DEFAULT_EMPLOYEES); saveAssignmentHistory([]); setAssignmentHistory([]); }}
+          onResetWorkloads={()=>{saveEmployees(DEFAULT_EMPLOYEES);setEmployees(DEFAULT_EMPLOYEES);saveAssignmentHistory([]);setAssignmentHistory([]);}}
         />
 
-        {/* LANDING */}
         {phase==="idle"&&(
           <Landing
             onStart={startRun}
@@ -1315,10 +1446,8 @@ export default function ChainMind(){
           />
         )}
 
-        {/* RUNNING / DONE */}
         {phase!=="idle"&&(
           <div style={{position:"relative",zIndex:1}}>
-            {/* Header */}
             <div style={{borderBottom:"1px solid var(--border)",padding:"12px 26px",display:"flex",alignItems:"center",gap:12,background:"var(--bg-header)",backdropFilter:"blur(32px)",WebkitBackdropFilter:"blur(32px)",position:"sticky",top:0,zIndex:10,boxShadow:"0 1px 0 rgba(255,255,255,0.04),0 4px 24px rgba(0,0,0,.4)"}}>
               <div style={{width:30,height:30,borderRadius:9,background:"linear-gradient(135deg,rgba(124,58,237,.2),rgba(14,165,233,.2))",border:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,backdropFilter:"blur(20px)"}}>⛓</div>
               <div style={{fontWeight:800,fontSize:15,letterSpacing:"-.5px"}}>ChainMind</div>
@@ -1332,19 +1461,16 @@ export default function ChainMind(){
                   {phase==="running"&&<span style={{color:"#4ade80",fontSize:9,animation:"blink 1s infinite"}}>●</span>}
                 </div>
               )}
-              {/* v9: show project name in header */}
               <div style={{color:"var(--text-muted)",fontSize:10,fontFamily:"monospace",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                 {selectedProject&&selectedProject.id!=="custom"
                   ?<><span style={{color:"var(--text-dim)"}}>{selectedProject.id}</span><span style={{color:"var(--text-muted)"}}> · {selectedProject.name}</span></>
-                  :`"${goal.substring(0,60)}…"`
-                }
+                  :`"${goal.substring(0,60)}…"`}
               </div>
-              {/* v9: Team button in header */}
               <button onClick={()=>setSidebarOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:6,background:"rgba(124,58,237,0.08)",border:"1px solid rgba(124,58,237,0.2)",borderRadius:7,color:"#a78bfa",padding:"5px 12px",cursor:"pointer",fontFamily:"monospace",fontSize:10,transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.background="rgba(124,58,237,0.15)";}} onMouseLeave={e=>{e.currentTarget.style.background="rgba(124,58,237,0.08)";}}>
                 👥 Team <span style={{background:"rgba(124,58,237,0.2)",borderRadius:10,padding:"1px 6px",fontSize:8,marginLeft:2}}>{employees.length}</span>
               </button>
               <ProviderSelector/>
-              <button onClick={toggleTheme} title={darkMode?"Switch to Light Mode":"Switch to Dark Mode"} style={{background:darkMode?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.06)",border:`1px solid ${darkMode?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.1)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",display:"flex",alignItems:"center",gap:6,transition:"all .3s"}}>
+              <button onClick={toggleTheme} style={{background:darkMode?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.06)",border:`1px solid ${darkMode?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.1)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",display:"flex",alignItems:"center",gap:6,transition:"all .3s"}}>
                 <span style={{fontSize:13}}>{darkMode?"☀️":"🌙"}</span>
                 <span style={{fontSize:9,fontFamily:"monospace",color:darkMode?"#64748b":"#475569",letterSpacing:.5}}>{darkMode?"LIGHT":"DARK"}</span>
               </button>
@@ -1358,8 +1484,6 @@ export default function ChainMind(){
 
               <div ref={gridRef} style={{display:"grid",gridTemplateColumns:"1fr 1.1fr 1fr",gap:16,position:"relative"}}>
                 <DataFlowOverlay containerRef={gridRef} activeAgent={activeAgentKey} phase={phase} agentCardRefs={agentCardRefs} traceRef={traceRef} memRef={memRef}/>
-
-                {/* LEFT — Agent pipeline */}
                 <div style={{position:"relative",zIndex:2}}>
                   <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>AGENT PIPELINE</div>
                   <div style={{display:"flex",flexDirection:"column",gap:9}}>
@@ -1372,8 +1496,6 @@ export default function ChainMind(){
                     }
                   </div>
                 </div>
-
-                {/* MIDDLE — Thought trace + MCP */}
                 <div style={{display:"flex",flexDirection:"column",gap:13,position:"relative",zIndex:2}}>
                   <div>
                     <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>VISUAL WORKFLOW INTERFACE</div>
@@ -1381,8 +1503,6 @@ export default function ChainMind(){
                   </div>
                   <MCPPanel active={mcp} pulsing={mcpPulsing} activeAgent={activeAgentKey}/>
                 </div>
-
-                {/* RIGHT — Memory + Routing */}
                 <div style={{display:"flex",flexDirection:"column",gap:13,position:"relative",zIndex:2}}>
                   <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>MEMORY + ROUTING</div>
                   <RightPanel entries={mem} activeModel={activeModel} stats={mStats} tokenCounts={tokenCounts} isRunning={phase==="running"} memRef={memRef} agentTokens={agentTokens}/>
@@ -1393,13 +1513,37 @@ export default function ChainMind(){
                 <div style={{marginTop:20}}>
                   <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>SYNTHESIZED OUTPUT</div>
                   <FinalReport reportText={reportText} elapsed={elapsed} tokenCounts={tokenCounts} timings={timings} agentTokens={agentTokens}/>
+                  <div style={{marginTop:20,padding:"18px 22px",borderRadius:14,background:"var(--bg-panel)",border:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,flexWrap:"wrap"}}>
+                    <div>
+                      <div style={{color:"var(--text-primary)",fontSize:13,fontWeight:700,fontFamily:"monospace",marginBottom:4}}>Ready for the next project?</div>
+                      <div style={{color:"var(--text-muted)",fontSize:11,fontFamily:"monospace"}}>
+                        Workloads are preserved — the Planner will see updated team capacity.
+                        {employees.filter(e=>e.workload>=80).length>0&&(
+                          <span style={{color:"#f87171",marginLeft:6}}>⚠ {employees.filter(e=>e.workload>=80).length} employee{employees.filter(e=>e.workload>=80).length>1?"s":""} overloaded.</span>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:10,flexShrink:0}}>
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        {employees.map(emp=>{
+                          const wColor=emp.workload>=80?"#f87171":emp.workload>=55?"#fbbf24":"#34d399";
+                          return(
+                            <div key={emp.id} title={`${emp.name}: ${emp.workload}%`} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                              <div style={{width:24,height:24,borderRadius:6,background:`${emp.color}18`,border:`1px solid ${emp.color}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:emp.color,fontFamily:"monospace"}}>{emp.name.split(" ").map(n=>n[0]).join("")}</div>
+                              <div style={{fontSize:7,fontFamily:"monospace",color:wColor,fontWeight:700}}>{emp.workload}%</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <button onClick={softReset} style={{background:"linear-gradient(135deg,#7C3AED,#0EA5E9)",border:"none",borderRadius:9,color:"#fff",padding:"10px 22px",cursor:"pointer",fontWeight:700,fontSize:13,boxShadow:"0 0 22px rgba(124,58,237,.4)",whiteSpace:"nowrap",fontFamily:"monospace"}}>▶ Run Another Project</button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
           </div>
         )}
 
-        {/* Gate overlay */}
         {phase==="gate"&&gate&&(
           <ApprovalGate verificationOutput={gate.verificationOutput} score={gate.score} onApprove={handleApprove} onReject={handleReject} onSteer={handleSteer}/>
         )}

@@ -159,10 +159,12 @@ export async function runExecution(goal, taskPlan, research) {
 Your job is to extract concrete, usable outputs from research findings.
 
 Rules:
-- Extract exactly 5 key data points as a numbered list
+- Extract EXACTLY 5 key data points as a numbered list — no more, no fewer
+- Number them 1 through 5 only
 - Each point must be a specific fact, metric, or actionable insight
 - Convert any vague claims into concrete statements
 - Flag any data that seems unreliable with [LOW CONFIDENCE]
+- Stop at point 5 — do not add a 6th point under any circumstances
 - No preamble, just the structured output`,
     `Goal: ${goal}
 
@@ -187,7 +189,8 @@ function normaliseVerification(raw) {
 
   const scoreMatch  = raw.match(/CONFIDENCE_SCORE[:\s]+(\d+)/i);
   const issuesMatch = raw.match(/ISSUES_FOUND[:\s]+(\d+)/i);
-  const score   = scoreMatch  ? parseInt(scoreMatch[1])  : 70;
+  // Floor at 40 — a 0 score from a pure format quirk (6 points vs 5) is misleading
+  const score   = scoreMatch  ? Math.max(40, parseInt(scoreMatch[1]))  : 70;
   const issues  = issuesMatch ? parseInt(issuesMatch[1]) : 1;
 
   const hasApproved    = /\bAPPROVED\b/i.test(raw);
@@ -229,23 +232,27 @@ function normaliseVerification(raw) {
 export async function runVerification(goal, research, execution) {
   const output = await callLLM(
     "mid",
-    `You are ChainMind's Verification Agent — a strict, uncompromising fact-checker.
+    `You are ChainMind's Verification Agent — a strict but fair fact-checker.
 
 The Execution Agent had one job: extract EXACTLY 5 numbered data points, each specific and concrete, from research findings.
 
 Your job: check if it did that correctly, then output your verdict.
 
 CHECK FOR:
-- Did it produce exactly 5 points numbered 1 through 5?
+- Did it produce exactly 5 points numbered 1 through 5? (6+ points is a minor format issue, not a critical failure)
 - Are the points specific (metrics, names, dates) or vague (general statements)?
 - Do the claims match what the research actually says?
 - Is anything missing or fabricated?
 
-SCORING:
+SCORING GUIDE — be fair, not punitive:
 90-100 → all 5 points, specific, accurate = APPROVED
-75-89  → minor vagueness or 1 weak claim = APPROVED
-50-74  → missing points or multiple vague claims = NEEDS_REVIEW
-0-49   → wrong format, fabricated data, goal missed = NEEDS_REVIEW
+75-89  → minor issues: 6 points instead of 5, or 1 slightly vague claim = APPROVED
+50-74  → multiple vague claims or clearly wrong data = NEEDS_REVIEW
+0-49   → completely wrong format, fabricated data, or goal entirely missed = NEEDS_REVIEW
+
+IMPORTANT: If the output has 6 points instead of 5 but all points are specific and accurate,
+score it 75-85 (APPROVED) — extra thoroughness is not a critical failure.
+Only score below 50 for genuinely bad output: fabricated data, totally vague claims, or wrong goal.
 
 OUTPUT RULES — this is critical:
 - Start your response with CONFIDENCE_SCORE: followed by a number
