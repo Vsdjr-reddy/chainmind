@@ -10,9 +10,78 @@ const DEFAULT_EMPLOYEES = [
   { id:"EMP006", name:"Meera Nair",    role:"AI Researcher",      skills:["LLMs","NLP","RAG","Deep Learning"],         experience:6, workload:55, color:"#EC4899" },
 ];
 
+// ── CSV Parsing Utilities ─────────────────────────────────────────────────────
+const EMP_COLORS = ["#7C3AED","#0EA5E9","#10B981","#F59E0B","#6366F1","#EC4899","#14B8A6","#F97316","#8B5CF6","#06B6D4"];
+
+function parseCSV(text){
+  const lines = text.trim().split("\n").filter(l => l.trim());
+  if(lines.length < 2) return [];
+  const headers = lines[0].split(",").map(h => h.trim().toLowerCase().replace(/\s+/g,"_"));
+  return lines.slice(1).map(line => {
+    // Handle quoted fields
+    const cols = [];
+    let cur = "", inQ = false;
+    for(let i = 0; i < line.length; i++){
+      if(line[i] === '"'){ inQ = !inQ; }
+      else if(line[i] === ',' && !inQ){ cols.push(cur.trim()); cur = ""; }
+      else { cur += line[i]; }
+    }
+    cols.push(cur.trim());
+    const obj = {};
+    headers.forEach((h,i) => { obj[h] = cols[i] ?? ""; });
+    return obj;
+  });
+}
+
+function parseEmployeesCSV(text){
+  const rows = parseCSV(text);
+  return rows.map((r, i) => ({
+    id:         r.employee_id || r.id || `EMP${String(i+1).padStart(3,"0")}`,
+    name:       r.name || "Unknown",
+    role:       r.role || "Engineer",
+    skills:     (r.skills || "").split(";").map(s => s.trim()).filter(Boolean),
+    experience: parseInt(r.experience_years || r.experience || 0, 10),
+    workload:   parseInt(r.current_workload_percent || r.workload || 0, 10),
+    color:      EMP_COLORS[i % EMP_COLORS.length],
+  }));
+}
+
+function parseProjectsCSV(text){
+  const rows = parseCSV(text);
+  return rows.map(r => ({
+    id:       r.project_id || r.id || "",
+    name:     r.project_name || r.name || "",
+    desc:     r.description || r.desc || "",
+    skills:   (r.required_skills || r.skills || "").split(";").map(s => s.trim()).filter(Boolean),
+    deadline: parseInt(r.deadline_days || r.deadline || 30, 10),
+    priority: r.priority || "Medium",
+  }));
+}
+
+function parseHistoryCSV(text){
+  const rows = parseCSV(text);
+  return rows.map(r => ({
+    id:       r.history_id || r.id || "",
+    name:     r.project_name || r.name || "",
+    teamSize: parseInt(r.team_size || r.teamsize || 3, 10),
+    days:     parseInt(r.completion_days || r.days || 30, 10),
+    score:    parseFloat(r.success_score || r.score || 0.9),
+  }));
+}
+
+function detectCSVType(text){
+  const header = text.split("\n")[0].toLowerCase();
+  // history MUST be checked before projects — history CSV also contains "project_id"
+  if(header.includes("history_id")   || header.includes("success_score") || header.includes("completion_days")) return "history";
+  if(header.includes("employee_id")  || header.includes("experience_years") || header.includes("current_workload")) return "employees";
+  if(header.includes("required_skills") || (header.includes("project_id") && !header.includes("history_id"))) return "projects";
+  if(header.includes("tool_id")      || header.includes("tool_type"))        return "tools";
+  return "unknown";
+}
+
 function loadEmployees(){
   try{ const s=localStorage.getItem("cm_employees"); if(s) return JSON.parse(s); }catch(e){}
-  return DEFAULT_EMPLOYEES;
+  return []; // empty until CSV uploaded
 }
 function saveEmployees(list){
   try{ localStorage.setItem("cm_employees",JSON.stringify(list)); }catch(e){}
@@ -786,7 +855,8 @@ function ProviderSelector(){
 }
 
 // ── ProjectSelector ───────────────────────────────────────────────────────────
-function ProjectSelector({onSelect,selectedId}){
+function ProjectSelector({onSelect,selectedId,projects:projectList}){
+  const activeProjects=projectList&&projectList.length>0?projectList:[];
   const [tab,setTab]=useState("project");
   const [focused,setFocused]=useState(false);
   const priorityColor=(p)=>p==="High"?"#f87171":p==="Medium"?"#fbbf24":"#34d399";
@@ -799,7 +869,14 @@ function ProjectSelector({onSelect,selectedId}){
       </div>
       {tab==="project"&&(
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          {PROJECTS.map(p=>{
+          {activeProjects.length===0&&(
+            <div style={{gridColumn:"1/-1",padding:"28px 16px",borderRadius:10,border:"1px dashed var(--border)",background:"var(--bg-card)",textAlign:"center"}}>
+              <div style={{fontSize:22,marginBottom:8,opacity:0.3}}>📋</div>
+              <div style={{color:"var(--text-muted)",fontSize:10,fontFamily:"monospace",fontWeight:700,marginBottom:4}}>No projects loaded</div>
+              <div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",opacity:0.7}}>Upload <code>neurax_projects_dataset.csv</code> →</div>
+            </div>
+          )}
+          {activeProjects.map(p=>{
             const isSelected=selectedId===p.id;
             return(
               <button key={p.id} onClick={()=>onSelect(p)} style={{textAlign:"left",background:isSelected?"rgba(124,58,237,0.12)":"var(--bg-card)",border:`1px solid ${isSelected?"rgba(124,58,237,0.5)":"var(--border)"}`,borderRadius:10,padding:"10px 12px",cursor:"pointer",transition:"all .2s",boxShadow:isSelected?"0 0 20px rgba(124,58,237,0.15)":"none"}} onMouseEnter={e=>{if(!isSelected){e.currentTarget.style.borderColor="rgba(124,58,237,0.3)";e.currentTarget.style.background="rgba(124,58,237,0.06)";}}} onMouseLeave={e=>{if(!isSelected){e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--bg-card)";}}} >
@@ -829,12 +906,18 @@ function ProjectSelector({onSelect,selectedId}){
 
 // ── WorkloadChart ─────────────────────────────────────────────────────────────
 function WorkloadChart({employees}){
+  if(!employees||employees.length===0) return(
+    <div style={{padding:"10px 18px",borderBottom:"1px solid var(--border-subtle)",flexShrink:0}}>
+      <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:2,marginBottom:6}}>TEAM WORKLOAD</div>
+      <div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",fontStyle:"italic"}}>Upload employees CSV to see workloads</div>
+    </div>
+  );
   return(
     <div style={{padding:"10px 18px",borderBottom:"1px solid var(--border-subtle)",flexShrink:0}}>
       <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:2,marginBottom:8}}>TEAM WORKLOAD</div>
       {employees.map(emp=>{
-        const def=DEFAULT_EMPLOYEES.find(d=>d.id===emp.id);
-        const delta=emp.workload-(def?.workload||0);
+        const def=null; // no hardcoded baseline — delta always 0 for uploaded data
+        const delta=0;
         const wColor=emp.workload>=80?"#f87171":emp.workload>=55?"#fbbf24":"#34d399";
         return(
           <div key={emp.id} style={{marginBottom:6}}>
@@ -887,7 +970,7 @@ function AssignmentHistoryPanel({history}){
 }
 
 // ── EmployeeSidebar ───────────────────────────────────────────────────────────
-function EmployeeSidebar({open,onClose,assignments,employees,onResetWorkloads,assignmentHistory}){
+function EmployeeSidebar({open,onClose,assignments,employees,onResetWorkloads,assignmentHistory,historyData}){
   return(
     <>
       {open&&<div onClick={onClose} style={{position:"fixed",inset:0,zIndex:299,background:"rgba(0,0,0,0.3)"}}/>}
@@ -903,7 +986,8 @@ function EmployeeSidebar({open,onClose,assignments,employees,onResetWorkloads,as
         <AssignmentHistoryPanel history={assignmentHistory}/>
         <div style={{padding:"10px 18px",borderBottom:"1px solid var(--border-subtle)",flexShrink:0}}>
           <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:2,marginBottom:6}}>PAST PROJECTS</div>
-          {HISTORY_DATA.map(h=>(
+          {(!historyData||historyData.length===0)&&<div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",fontStyle:"italic",paddingBottom:4}}>Upload history CSV to see past projects</div>}
+          {(historyData||[]).map(h=>(
             <div key={h.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,padding:"5px 8px",borderRadius:6,background:"var(--bg-hover)"}}>
               <div style={{flex:1}}><div style={{color:"var(--text-dim)",fontSize:9,fontFamily:"monospace",fontWeight:700}}>{h.name}</div><div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>{h.days} days · {h.teamSize} members</div></div>
               <div style={{color:h.score>=0.92?"#34d399":"#fbbf24",fontSize:10,fontFamily:"monospace",fontWeight:700}}>{Math.round(h.score*100)}%</div>
@@ -912,12 +996,18 @@ function EmployeeSidebar({open,onClose,assignments,employees,onResetWorkloads,as
         </div>
         <div style={{flex:1,overflowY:"auto",padding:"10px 18px"}}>
           <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:2,marginBottom:8}}>EMPLOYEES</div>
+          {(!employees||employees.length===0)&&(
+            <div style={{padding:"20px 0",textAlign:"center"}}>
+              <div style={{fontSize:22,marginBottom:8,opacity:0.2}}>👥</div>
+              <div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",fontStyle:"italic"}}>Upload employees CSV to see team</div>
+            </div>
+          )}
           {employees.map(emp=>{
             const assigned=assignments?.[emp.id];
             const isOverloaded=emp.workload>=80;
             const workloadColor=isOverloaded?"#f87171":emp.workload>=55?"#fbbf24":"#34d399";
-            const def=DEFAULT_EMPLOYEES.find(d=>d.id===emp.id);
-            const delta=emp.workload-(def?.workload||0);
+            const def=null; // no hardcoded baseline for CSV-uploaded employees
+            const delta=0;
             return(
               <div key={emp.id} style={{marginBottom:10,padding:"11px 12px",borderRadius:10,background:isOverloaded?"rgba(248,113,113,0.05)":assigned?"rgba(124,58,237,0.08)":"var(--bg-card)",border:`1px solid ${isOverloaded?"rgba(248,113,113,0.3)":assigned?emp.color+"55":"var(--border)"}`,transition:"all .3s",boxShadow:isOverloaded?"0 0 14px rgba(248,113,113,0.15)":assigned?`0 0 14px ${emp.color}22`:"none",animation:assigned?"fadeSlideIn .4s ease":"none"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
@@ -952,10 +1042,142 @@ function EmployeeSidebar({open,onClose,assignments,employees,onResetWorkloads,as
   );
 }
 
-// ── Landing — FULL SCREEN TWO-COLUMN ─────────────────────────────────────────
+// ── CSVUploader ───────────────────────────────────────────────────────────────
+function CSVUploader({ onEmployees, onProjects, onHistory, uploadedFiles, onReset }){
+  const [dragOver, setDragOver] = useState(null); // which slot is being dragged over
+  const fileInputRef = useRef(null);
+  const [activeSlot, setActiveSlot] = useState(null);
+
+  const SLOTS = [
+    { key:"employees", label:"Employees",       icon:"👥", color:"#a78bfa", hint:"employee_id, name, role, skills…"      },
+    { key:"projects",  label:"Projects",        icon:"📋", color:"#38bdf8", hint:"project_id, project_name, skills…"     },
+    { key:"history",   label:"Project History", icon:"📈", color:"#34d399", hint:"history_id, project_name, score…"      },
+  ];
+
+  const handleFile = (file, slotKey) => {
+    if(!file || !file.name.endsWith(".csv")) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const text = e.target.result;
+      const detected = detectCSVType(text);
+      const type = detected !== "unknown" ? detected : slotKey; // auto-detect takes priority over slot
+      try {
+        if(type === "employees"){ const parsed = parseEmployeesCSV(text); if(parsed.length) onEmployees(parsed); }
+        if(type === "projects") { const parsed = parseProjectsCSV(text);  if(parsed.length) onProjects(parsed);  }
+        if(type === "history")  { const parsed = parseHistoryCSV(text);   if(parsed.length) onHistory(parsed);   }
+      } catch(err){ console.error("CSV parse error:", err); }
+    };
+    reader.readAsText(file);
+  };
+
+  const onDrop = (e, slotKey) => {
+    e.preventDefault(); setDragOver(null);
+    const file = e.dataTransfer.files[0];
+    handleFile(file, slotKey);
+  };
+
+  const onFileInput = e => {
+    const file = e.target.files[0];
+    handleFile(file, activeSlot);
+    e.target.value = "";
+  };
+
+  return (
+    <div style={{position:"relative",zIndex:1}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+        <div style={{width:5,height:5,borderRadius:"50%",background:"#38bdf8",boxShadow:"0 0 6px #0EA5E9"}}/>
+        <span style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",letterSpacing:2}}>DATA IMPORT</span>
+        <span style={{marginLeft:"auto",color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>drag & drop CSV files</span>
+      </div>
+
+      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+        {SLOTS.map(slot => {
+          const uploaded = uploadedFiles[slot.key];
+          const isDragTarget = dragOver === slot.key;
+          return (
+            <div
+              key={slot.key}
+              onDragOver={e=>{ e.preventDefault(); setDragOver(slot.key); }}
+              onDragLeave={()=>setDragOver(null)}
+              onDrop={e=>onDrop(e, slot.key)}
+              onClick={()=>{ setActiveSlot(slot.key); fileInputRef.current?.click(); }}
+              style={{
+                display:"flex", alignItems:"center", gap:12,
+                padding:"10px 14px", borderRadius:10, cursor:"pointer",
+                background: uploaded
+                  ? `${slot.color}08`
+                  : isDragTarget
+                  ? `${slot.color}12`
+                  : "var(--bg-card)",
+                border: `1px solid ${uploaded ? slot.color+"55" : isDragTarget ? slot.color+"88" : "var(--border)"}`,
+                boxShadow: isDragTarget ? `0 0 18px ${slot.color}33` : uploaded ? `0 0 10px ${slot.color}18` : "none",
+                transition:"all .2s",
+                animation: uploaded ? "fadeSlideIn .3s ease" : "none",
+              }}
+              onMouseEnter={e=>{ if(!uploaded && !isDragTarget){ e.currentTarget.style.borderColor=`${slot.color}44`; e.currentTarget.style.background=`${slot.color}06`; }}}
+              onMouseLeave={e=>{ if(!uploaded && !isDragTarget){ e.currentTarget.style.borderColor="var(--border)"; e.currentTarget.style.background="var(--bg-card)"; }}}
+            >
+              {/* Icon */}
+              <div style={{
+                width:32, height:32, borderRadius:8, flexShrink:0,
+                background: uploaded ? `${slot.color}18` : "rgba(255,255,255,0.03)",
+                border: `1px solid ${uploaded ? slot.color+"44" : "var(--border)"}`,
+                display:"flex", alignItems:"center", justifyContent:"center", fontSize:14,
+              }}>
+                {uploaded ? "✓" : slot.icon}
+              </div>
+
+              {/* Label + status */}
+              <div style={{flex:1, minWidth:0}}>
+                <div style={{color: uploaded ? slot.color : "var(--text-secondary)", fontSize:11, fontWeight:700, fontFamily:"monospace"}}>
+                  {slot.label}
+                </div>
+                <div style={{color:"var(--text-muted)", fontSize:8, fontFamily:"monospace", marginTop:1, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>
+                  {uploaded
+                    ? `✓ ${uploaded.name} · ${uploaded.count} records loaded`
+                    : isDragTarget
+                    ? "Drop to load…"
+                    : slot.hint
+                  }
+                </div>
+              </div>
+
+              {/* Right badge */}
+              <div style={{flexShrink:0}}>
+                {uploaded
+                  ? <span style={{background:`${slot.color}18`,border:`1px solid ${slot.color}44`,borderRadius:4,padding:"2px 7px",fontSize:8,color:slot.color,fontFamily:"monospace",fontWeight:700}}>LOADED</span>
+                  : <span style={{background:"rgba(255,255,255,0.03)",border:"1px solid var(--border)",borderRadius:4,padding:"2px 7px",fontSize:8,color:"var(--text-muted)",fontFamily:"monospace"}}>
+                      {isDragTarget ? "DROP" : "UPLOAD"}
+                    </span>
+                }
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Single hidden file input */}
+      <input ref={fileInputRef} type="file" accept=".csv" style={{display:"none"}} onChange={onFileInput}/>
+
+      {/* Reset — only shown when files loaded */}
+      {Object.keys(uploadedFiles).length > 0 && (
+        <div style={{marginTop:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <span style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>
+            {Object.keys(uploadedFiles).length} file{Object.keys(uploadedFiles).length>1?"s":""} loaded
+          </span>
+          <button onClick={onReset} style={{background:"transparent",border:"none",color:"#f87171",fontSize:8,fontFamily:"monospace",cursor:"pointer",padding:"2px 6px",borderRadius:4,transition:"all .15s"}}
+            onMouseEnter={e=>e.currentTarget.style.background="rgba(248,113,113,0.1)"}
+            onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+            ↺ clear all
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Landing — WIREFRAME LAYOUT: goal input left, live agent pipeline right ────
-function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,onToggleSidebar,assignments,employeeCount,darkMode,toggleTheme}){
+function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,onToggleSidebar,assignments,employeeCount,darkMode,toggleTheme,onEmployees,onProjects,onHistory,uploadedFiles,activeProjects,onResetCSV}){
   return (
     <div style={{
       position:"relative",zIndex:1,
@@ -1033,7 +1255,7 @@ function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,
           <GoalHistory history={history} onSelect={goal=>onSelectProject({id:"custom",name:"Custom Goal",desc:goal,skills:[],deadline:0,priority:"Medium"})}/>
 
           {/* Project selector */}
-          <ProjectSelector onSelect={onSelectProject} selectedId={selectedProject?.id}/>
+          <ProjectSelector onSelect={onSelectProject} selectedId={selectedProject?.id} projects={activeProjects}/>
 
           {/* Sample prompts */}
           <div style={{display:"flex",gap:6,marginTop:12,flexWrap:"wrap"}}>
@@ -1095,6 +1317,17 @@ function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,
             <div style={{width:5,height:5,borderRadius:"50%",background:"#34d399",boxShadow:"0 0 6px #10B981",animation:"breathe 1.4s infinite"}}/>
             <span style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",letterSpacing:2}}>LIVE AGENT WORKFLOW</span>
             <span style={{marginLeft:"auto",color:"#34d399",fontSize:9,fontFamily:"monospace"}}>PL → RE → EX → VE → ME → RP</span>
+          </div>
+
+          {/* CSV Uploader */}
+          <div style={{marginBottom:20}}>
+            <CSVUploader
+              onEmployees={onEmployees}
+              onProjects={onProjects}
+              onHistory={onHistory}
+              uploadedFiles={uploadedFiles}
+              onReset={onResetCSV}
+            />
           </div>
 
           {/* MiniPreview — the live orchestration widget */}
@@ -1191,6 +1424,30 @@ export default function ChainMind(){
   const [assignmentHistory,setAssignmentHistory]=useState(loadAssignmentHistory);
   const [skillGapWarning,setSkillGapWarning]=useState(null);
   const [darkMode,setDarkMode]=useState(()=>{try{return localStorage.getItem("cm_theme")!=="light";}catch(e){return true;}});
+  const [uploadedFiles,setUploadedFiles]=useState({});
+  const [csvProjects,setCsvProjects]=useState(null);   // null = use hardcoded PROJECTS
+  const [csvHistory,setCsvHistory]=useState(null);     // null = use hardcoded HISTORY_DATA
+  // Keep refs in sync so buildGoal (non-reactive closure) always sees latest
+  const parsedProjectsRef=useRef(null);
+  const parsedHistoryRef=useRef(null);
+
+  const handleEmployeesCSV=useCallback((parsed)=>{
+    saveEmployees(parsed);
+    setEmployees(parsed);
+    setUploadedFiles(p=>({...p,employees:{name:`${parsed.length} employees`,count:parsed.length}}));
+  },[]);
+
+  const handleProjectsCSV=useCallback((parsed)=>{
+    parsedProjectsRef.current=parsed;
+    setCsvProjects(parsed);   // triggers re-render so Landing gets fresh activeProjects
+    setUploadedFiles(p=>({...p,projects:{name:`${parsed.length} projects`,count:parsed.length}}));
+  },[]);
+
+  const handleHistoryCSV=useCallback((parsed)=>{
+    parsedHistoryRef.current=parsed;
+    setCsvHistory(parsed);    // triggers re-render so buildGoal uses fresh history
+    setUploadedFiles(p=>({...p,history:{name:`${parsed.length} entries`,count:parsed.length}}));
+  },[]);
 
   const t0=useRef(null),live=useRef(false),steerRef=useRef(null);
   const gridRef=useRef(null),agentCardRefs=useRef({}),traceRef=useRef(null),memRef=useRef(null);
@@ -1202,7 +1459,8 @@ export default function ChainMind(){
       const status=e.workload>=80?"UNAVAILABLE — overloaded, do not assign":"available";
       return `${e.name} (${e.role}, Skills: ${e.skills.join(", ")}, Workload: ${e.workload}%, Experience: ${e.experience}yr, Status: ${status})`;
     }).join("\n");
-    const histSummary=HISTORY_DATA.map(h=>`${h.name}: ${h.teamSize} members, ${h.days} days, success score ${h.score}`).join("\n");
+    const histData=parsedHistoryRef.current||[];
+    const histSummary=histData.map(h=>`${h.name}: ${h.teamSize} members, ${h.days} days, success score ${h.score}`).join("\n");
     return `PROJECT: ${project.name}\nDESCRIPTION: ${project.desc}\nREQUIRED SKILLS: ${project.skills.join(", ")}\nDEADLINE: ${project.deadline} days\nPRIORITY: ${project.priority}\n\nTEAM MEMBERS:\n${empSummary}\n\nPAST PROJECT HISTORY:\n${histSummary}\n\nAnalyse the project requirements, decompose into sub-tasks, and assign each sub-task to the most appropriate team member based on their skills and current workload. Do NOT assign tasks to employees marked UNAVAILABLE.`;
   }
 
@@ -1428,6 +1686,7 @@ export default function ChainMind(){
           assignments={assignments}
           employees={employees}
           assignmentHistory={assignmentHistory}
+          historyData={csvHistory}
           onResetWorkloads={()=>{saveEmployees(DEFAULT_EMPLOYEES);setEmployees(DEFAULT_EMPLOYEES);saveAssignmentHistory([]);setAssignmentHistory([]);}}
         />
 
@@ -1443,6 +1702,21 @@ export default function ChainMind(){
             employeeCount={employees.length}
             darkMode={darkMode}
             toggleTheme={toggleTheme}
+            onEmployees={handleEmployeesCSV}
+            onProjects={handleProjectsCSV}
+            onHistory={handleHistoryCSV}
+            uploadedFiles={uploadedFiles}
+            activeProjects={csvProjects||[]}
+            onResetCSV={()=>{
+              setCsvProjects(null);
+              setCsvHistory(null);
+              parsedProjectsRef.current=null;
+              parsedHistoryRef.current=null;
+              saveEmployees(DEFAULT_EMPLOYEES);
+              setEmployees(DEFAULT_EMPLOYEES);
+              setUploadedFiles({});
+              setSelectedProject(null);
+            }}
           />
         )}
 
