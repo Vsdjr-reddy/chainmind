@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { runPlanner, runResearch, runExecution, runVerification, runMemory, runReport } from "./api.js";
 
 const AGENTS = [
@@ -19,11 +19,83 @@ const RUNNERS = {
   report:       (goal, o) => runReport(goal, o.planner, o.research, o.execution, o.verification, o.steerNote),
 };
 
-// ── Approval Gate Modal ───────────────────────────────────────────────────────
+function extractScore(text) {
+  const match = text.match(/SCORE[:\s]+(\d+)/i) || text.match(/(\d+)\s*\/\s*100/);
+  return match ? Math.min(100, parseInt(match[1])) : 70;
+}
+
+// ── ThoughtTrace Panel ────────────────────────────────────────────────────────
+function ThoughtTrace({ entries }) {
+  const bottomRef = useRef(null);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [entries]);
+
+  return (
+    <div style={{
+      background: "rgba(3,3,14,0.95)",
+      border: "1px solid rgba(255,255,255,0.05)",
+      borderRadius: 14, padding: 14,
+      height: 420, display: "flex", flexDirection: "column",
+      backdropFilter: "blur(20px)",
+    }}>
+      <div style={{
+        color: "#1e2a3a", fontSize: 10, letterSpacing: 2,
+        marginBottom: 10, fontFamily: "monospace", flexShrink: 0,
+      }}>
+        THOUGHT TRACE
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+        {entries.length === 0 && (
+          <div style={{ color: "#1e2a3a", fontSize: 10, fontFamily: "monospace", fontStyle: "italic" }}>
+            Waiting for pipeline to start…
+          </div>
+        )}
+        {entries.map((e, i) => {
+          const agent = AGENTS.find(a => a.key === e.agent);
+          return (
+            <div key={i} style={{ animation: "fadeSlideIn .3s ease" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                <div style={{ width: 5, height: 5, borderRadius: "50%", background: agent?.color || "#475569", flexShrink: 0 }}/>
+                <span style={{ color: agent?.color || "#475569", fontSize: 9, fontFamily: "monospace", fontWeight: 700 }}>
+                  {agent?.label || e.agent}
+                </span>
+                {e.model && (
+                  <span style={{
+                    fontSize: 7, color: "#334155", fontFamily: "monospace",
+                    background: "rgba(255,255,255,0.03)", padding: "1px 5px", borderRadius: 3,
+                  }}>
+                    {e.model}
+                  </span>
+                )}
+                <span style={{ color: "#1e2a3a", fontSize: 8, fontFamily: "monospace", marginLeft: "auto" }}>
+                  {e.time}
+                </span>
+              </div>
+              <div style={{
+                background: "rgba(0,0,0,0.3)",
+                borderLeft: `2px solid ${agent?.color || "#475569"}44`,
+                borderRadius: "0 5px 5px 0",
+                padding: "5px 9px",
+                fontSize: 9, color: "#94a3b8",
+                fontFamily: "monospace", lineHeight: 1.6,
+                whiteSpace: "pre-wrap", wordBreak: "break-word",
+              }}>
+                {e.text}
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+    </div>
+  );
+}
+
+// ── Approval Gate ─────────────────────────────────────────────────────────────
 function ApprovalGate({ score, verificationOutput, onApprove, onReject, onSteer }) {
   const [steerNote, setSteerNote] = useState("");
   const [showSteer, setShowSteer] = useState(false);
-
   const scoreColor = score >= 80 ? "#34d399" : score >= 60 ? "#fbbf24" : "#f87171";
 
   return (
@@ -34,150 +106,73 @@ function ApprovalGate({ score, verificationOutput, onApprove, onReject, onSteer 
     }}>
       <div style={{
         background: "linear-gradient(135deg,#080818,#0c0820)",
-        border: "1px solid #F59E0B99",
-        borderRadius: 20, padding: 34,
+        border: "1px solid #F59E0B99", borderRadius: 20, padding: 34,
         maxWidth: 520, width: "92%",
         boxShadow: "0 0 70px rgba(245,158,11,.22)",
       }}>
-        {/* Header */}
         <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
           <div style={{
             width: 48, height: 48, borderRadius: 14,
-            background: "rgba(245,158,11,.12)",
-            border: "1px solid rgba(245,158,11,.35)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 24,
+            background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.35)",
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24,
           }}>⚠</div>
           <div>
-            <div style={{ color: "#fbbf24", fontWeight: 700, fontSize: 15 }}>
-              Conditional Approval Gate
-            </div>
-            <div style={{ color: "#713f12", fontSize: 10, fontFamily: "monospace", letterSpacing: 1, marginTop: 2 }}>
-              HUMAN REVIEW REQUIRED
-            </div>
+            <div style={{ color: "#fbbf24", fontWeight: 700, fontSize: 15 }}>Conditional Approval Gate</div>
+            <div style={{ color: "#713f12", fontSize: 10, fontFamily: "monospace", letterSpacing: 1, marginTop: 2 }}>HUMAN REVIEW REQUIRED</div>
           </div>
-          {/* Score badge */}
           <div style={{
             marginLeft: "auto", textAlign: "center",
             background: "rgba(0,0,0,0.3)", borderRadius: 10,
             padding: "8px 14px", border: `1px solid ${scoreColor}44`,
           }}>
-            <div style={{ color: scoreColor, fontSize: 24, fontWeight: 800, fontFamily: "monospace", lineHeight: 1 }}>
-              {score}
-            </div>
-            <div style={{ color: "#334155", fontSize: 8, fontFamily: "monospace", letterSpacing: 1 }}>
-              CONFIDENCE
-            </div>
+            <div style={{ color: scoreColor, fontSize: 24, fontWeight: 800, fontFamily: "monospace", lineHeight: 1 }}>{score}</div>
+            <div style={{ color: "#334155", fontSize: 8, fontFamily: "monospace", letterSpacing: 1 }}>CONFIDENCE</div>
           </div>
         </div>
-
-        {/* Verification output */}
         <div style={{
-          background: "rgba(245,158,11,.05)",
-          border: "1px solid rgba(245,158,11,.18)",
-          borderRadius: 10, padding: 12, marginBottom: 16,
-          maxHeight: 140, overflowY: "auto",
+          background: "rgba(245,158,11,.05)", border: "1px solid rgba(245,158,11,.18)",
+          borderRadius: 10, padding: 12, marginBottom: 16, maxHeight: 140, overflowY: "auto",
         }}>
-          <div style={{ color: "#713f12", fontSize: 9, fontFamily: "monospace", letterSpacing: 1, marginBottom: 6 }}>
-            VERIFICATION OUTPUT
-          </div>
-          <div style={{ color: "#e2e8f0", fontSize: 11, fontFamily: "monospace", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
-            {verificationOutput}
-          </div>
+          <div style={{ color: "#713f12", fontSize: 9, fontFamily: "monospace", letterSpacing: 1, marginBottom: 6 }}>VERIFICATION OUTPUT</div>
+          <div style={{ color: "#e2e8f0", fontSize: 11, fontFamily: "monospace", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{verificationOutput}</div>
         </div>
-
-        {/* Steer input */}
         {showSteer && (
           <div style={{ marginBottom: 16 }}>
-            <div style={{ color: "#6366F1", fontSize: 9, fontFamily: "monospace", letterSpacing: 1, marginBottom: 6 }}>
-              STEERING NOTE — injected into Report context
-            </div>
+            <div style={{ color: "#6366F1", fontSize: 9, fontFamily: "monospace", letterSpacing: 1, marginBottom: 6 }}>STEERING NOTE</div>
             <textarea
-              value={steerNote}
-              onChange={e => setSteerNote(e.target.value)}
-              placeholder="Tell the Report agent what to correct or emphasise…"
+              value={steerNote} onChange={e => setSteerNote(e.target.value)}
+              placeholder="Tell the Report agent what to correct…"
               rows={3}
               style={{
                 width: "100%", background: "rgba(0,0,0,0.4)",
-                border: "1px solid rgba(99,102,241,0.4)",
-                borderRadius: 8, padding: "8px 10px",
-                color: "#e2e8f0", fontSize: 11,
+                border: "1px solid rgba(99,102,241,0.4)", borderRadius: 8,
+                padding: "8px 10px", color: "#e2e8f0", fontSize: 11,
                 fontFamily: "monospace", resize: "vertical", outline: "none",
               }}
             />
           </div>
         )}
-
-        {/* Action buttons */}
         <div style={{ display: "flex", gap: 10 }}>
-          <button
-            onClick={onApprove}
-            style={{
-              flex: 1, padding: "11px 0",
-              background: "rgba(52,211,153,0.12)",
-              border: "1px solid rgba(52,211,153,0.4)",
-              borderRadius: 10, color: "#34d399",
-              fontSize: 12, fontWeight: 700,
-              fontFamily: "monospace", cursor: "pointer",
-            }}
-          >✓ APPROVE</button>
-
-          {!showSteer ? (
-            <button
-              onClick={() => setShowSteer(true)}
-              style={{
-                flex: 1, padding: "11px 0",
-                background: "rgba(99,102,241,0.12)",
-                border: "1px solid rgba(99,102,241,0.4)",
-                borderRadius: 10, color: "#818cf8",
-                fontSize: 12, fontWeight: 700,
-                fontFamily: "monospace", cursor: "pointer",
-              }}
-            >↻ STEER</button>
-          ) : (
-            <button
-              onClick={() => onSteer(steerNote)}
-              disabled={!steerNote.trim()}
-              style={{
-                flex: 1, padding: "11px 0",
-                background: steerNote.trim() ? "rgba(99,102,241,0.2)" : "rgba(99,102,241,0.05)",
-                border: "1px solid rgba(99,102,241,0.4)",
-                borderRadius: 10, color: "#818cf8",
-                fontSize: 12, fontWeight: 700,
-                fontFamily: "monospace",
-                cursor: steerNote.trim() ? "pointer" : "not-allowed",
-              }}
-            >↻ SUBMIT STEER</button>
-          )}
-
-          <button
-            onClick={onReject}
-            style={{
-              flex: 1, padding: "11px 0",
-              background: "rgba(248,113,113,0.12)",
-              border: "1px solid rgba(248,113,113,0.4)",
-              borderRadius: 10, color: "#f87171",
-              fontSize: 12, fontWeight: 700,
-              fontFamily: "monospace", cursor: "pointer",
-            }}
-          >✕ REJECT</button>
+          <button onClick={onApprove} style={{ flex:1, padding:"11px 0", background:"rgba(52,211,153,0.12)", border:"1px solid rgba(52,211,153,0.4)", borderRadius:10, color:"#34d399", fontSize:12, fontWeight:700, fontFamily:"monospace", cursor:"pointer" }}>✓ APPROVE</button>
+          {!showSteer
+            ? <button onClick={() => setShowSteer(true)} style={{ flex:1, padding:"11px 0", background:"rgba(99,102,241,0.12)", border:"1px solid rgba(99,102,241,0.4)", borderRadius:10, color:"#818cf8", fontSize:12, fontWeight:700, fontFamily:"monospace", cursor:"pointer" }}>↻ STEER</button>
+            : <button onClick={() => onSteer(steerNote)} disabled={!steerNote.trim()} style={{ flex:1, padding:"11px 0", background:steerNote.trim()?"rgba(99,102,241,0.2)":"rgba(99,102,241,0.05)", border:"1px solid rgba(99,102,241,0.4)", borderRadius:10, color:"#818cf8", fontSize:12, fontWeight:700, fontFamily:"monospace", cursor:steerNote.trim()?"pointer":"not-allowed" }}>↻ SUBMIT</button>
+          }
+          <button onClick={onReject} style={{ flex:1, padding:"11px 0", background:"rgba(248,113,113,0.12)", border:"1px solid rgba(248,113,113,0.4)", borderRadius:10, color:"#f87171", fontSize:12, fontWeight:700, fontFamily:"monospace", cursor:"pointer" }}>✕ REJECT</button>
         </div>
       </div>
     </div>
   );
 }
 
+// ── Agent Card ────────────────────────────────────────────────────────────────
 function AgentCard({ agent, status, output, isActive }) {
-  const borderColor = status === "done" ? agent.color
-    : status === "active" ? agent.color
-    : "rgba(255,255,255,0.06)";
-  const bg = status === "active" ? `${agent.color}12` : "rgba(8,8,26,0.9)";
-
+  const borderColor = status === "done" || status === "active" ? agent.color : "rgba(255,255,255,0.06)";
   return (
     <div style={{
-      border: `1px solid ${borderColor}`,
-      borderRadius: 12, padding: 16,
-      background: bg, transition: "all 0.4s ease",
+      border: `1px solid ${borderColor}`, borderRadius: 12, padding: 16,
+      background: status === "active" ? `${agent.color}12` : "rgba(8,8,26,0.9)",
+      transition: "all 0.4s ease",
       boxShadow: status === "active" ? `0 0 20px ${agent.color}33` : "none",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -186,114 +181,91 @@ function AgentCard({ agent, status, output, isActive }) {
           background: status === "pending" ? "#1e293b" : agent.color,
           boxShadow: status === "active" ? `0 0 10px ${agent.color}` : "none",
           transition: "all 0.3s",
-        }} />
+        }}/>
         <span style={{ color: status === "pending" ? "#334155" : agent.color, fontWeight: 700, fontSize: 13, fontFamily: "monospace" }}>
           {agent.label}
         </span>
-        <span style={{ marginLeft: "auto", fontSize: 8, color: "#334155", fontFamily: "monospace", letterSpacing: 1 }}>
-          {agent.model}
-        </span>
+        <span style={{ marginLeft: "auto", fontSize: 8, color: "#334155", fontFamily: "monospace", letterSpacing: 1 }}>{agent.model}</span>
         {status === "done"   && <span style={{ fontSize: 10, color: agent.color }}>✓</span>}
         {status === "active" && <span style={{ fontSize: 8, color: agent.color, fontFamily: "monospace", animation: "blink 1s infinite" }}>RUNNING</span>}
       </div>
-      <div style={{ fontSize: 10, color: "#334155", fontFamily: "monospace", marginBottom: 8 }}>
-        {agent.task}
-      </div>
+      <div style={{ fontSize: 10, color: "#334155", fontFamily: "monospace", marginBottom: 8 }}>{agent.task}</div>
       {output && (
         <div style={{
-          background: "rgba(0,0,0,0.4)", borderRadius: 6,
-          padding: "8px 10px", fontSize: 10, color: "#94a3b8",
-          fontFamily: "monospace", lineHeight: 1.6,
-          maxHeight: 120, overflowY: "auto", whiteSpace: "pre-wrap",
+          background: "rgba(0,0,0,0.4)", borderRadius: 6, padding: "8px 10px",
+          fontSize: 10, color: "#94a3b8", fontFamily: "monospace", lineHeight: 1.6,
+          maxHeight: 100, overflowY: "auto", whiteSpace: "pre-wrap",
           borderLeft: `2px solid ${agent.color}44`,
         }}>
-          {output.substring(0, 400)}{output.length > 400 ? "…" : ""}
+          {output.substring(0, 300)}{output.length > 300 ? "…" : ""}
         </div>
       )}
       {isActive && (
         <div style={{ marginTop: 10, height: 2, background: "#0a0a18", borderRadius: 1, overflow: "hidden" }}>
-          <div style={{
-            height: "100%", width: "40%",
-            background: `linear-gradient(90deg, transparent, ${agent.color}, transparent)`,
-            animation: "scan 1.5s ease-in-out infinite",
-          }} />
+          <div style={{ height: "100%", width: "40%", background: `linear-gradient(90deg,transparent,${agent.color},transparent)`, animation: "scan 1.5s ease-in-out infinite" }}/>
         </div>
       )}
     </div>
   );
 }
 
-// Extract confidence score from verification output
-function extractScore(text) {
-  const match = text.match(/SCORE[:\s]+(\d+)/i) || text.match(/(\d+)\s*\/\s*100/);
-  return match ? Math.min(100, parseInt(match[1])) : 70;
-}
-
+// ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
-  const [goal, setGoal]       = useState("");
-  const [phase, setPhase]     = useState("idle");
+  const [goal, setGoal]         = useState("");
+  const [phase, setPhase]       = useState("idle");
   const [statuses, setStatuses] = useState({});
-  const [outputs, setOutputs] = useState({});
-  const [gate, setGate]       = useState(null);   // { score, verificationOutput }
-  const [error, setError]     = useState(null);
-  const live = useRef(true);
+  const [outputs, setOutputs]   = useState({});
+  const [trace, setTrace]       = useState([]);
+  const [gate, setGate]         = useState(null);
+  const [error, setError]       = useState(null);
+  const live        = useRef(true);
   const gateResolve = useRef(null);
 
   const setStatus = (key, val) => setStatuses(p => ({ ...p, [key]: val }));
 
-  // Returns "approve" | "reject" | steer-note string
+  function log(agent, text, model) {
+    const time = new Date().toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    setTrace(p => [...p, { agent, text, model, time }]);
+  }
+
   function waitForGate(score, verificationOutput) {
     return new Promise(resolve => {
       gateResolve.current = resolve;
       setGate({ score, verificationOutput });
     });
   }
-
-  function handleApprove()       { setGate(null); gateResolve.current?.("approve"); }
-  function handleReject()        { setGate(null); gateResolve.current?.("reject");  }
-  function handleSteer(note)     { setGate(null); gateResolve.current?.(note);      }
+  function handleApprove()   { setGate(null); gateResolve.current?.("approve"); }
+  function handleReject()    { setGate(null); gateResolve.current?.("reject");  }
+  function handleSteer(note) { setGate(null); gateResolve.current?.(note);      }
 
   async function run() {
     if (!goal.trim()) return;
     live.current = true;
-    setPhase("running");
-    setStatuses({});
-    setOutputs({});
-    setError(null);
-    setGate(null);
+    setPhase("running"); setStatuses({}); setOutputs({});
+    setTrace([]); setError(null); setGate(null);
 
     const collected = {};
-
     for (const agent of AGENTS) {
       if (!live.current) break;
       setStatus(agent.key, "active");
-
+      log(agent.key, `Starting: ${agent.task}`, agent.model);
       try {
         const result = await RUNNERS[agent.key](goal, collected);
         collected[agent.key] = result;
         setOutputs(p => ({ ...p, [agent.key]: result }));
         setStatus(agent.key, "done");
+        log(agent.key, result, agent.model);
 
-        // ── Gate fires after Verification ──────────────────────────────────
         if (agent.key === "verification") {
           const score = extractScore(result);
           const decision = await waitForGate(score, result);
-
-          if (decision === "reject") {
-            setPhase("rejected");
-            return;
-          }
-          if (decision !== "approve") {
-            // It's a steer note
-            collected.steerNote = decision;
-          }
+          if (decision === "reject") { setPhase("rejected"); return; }
+          if (decision !== "approve") collected.steerNote = decision;
         }
-
       } catch (err) {
         setStatus(agent.key, "error");
         setError(`${agent.label} failed: ${err.message}`);
-        setPhase("error");
-        return;
+        setPhase("error"); return;
       }
     }
     setPhase("done");
@@ -301,146 +273,79 @@ export default function App() {
 
   function reset() {
     live.current = false;
-    setPhase("idle");
-    setStatuses({});
-    setOutputs({});
-    setError(null);
-    setGate(null);
-    setGoal("");
+    setPhase("idle"); setStatuses({}); setOutputs({});
+    setTrace([]); setError(null); setGate(null); setGoal("");
   }
 
   return (
     <div style={{ minHeight: "100vh", background: "#04040e", color: "#94a3b8", fontFamily: "system-ui, sans-serif", padding: 24 }}>
       <style>{`
-        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-        @keyframes scan  { 0%{transform:translateX(-100%)} 100%{transform:translateX(350%)} }
+        @keyframes blink        { 0%,100%{opacity:1} 50%{opacity:0} }
+        @keyframes scan         { 0%{transform:translateX(-100%)} 100%{transform:translateX(350%)} }
+        @keyframes fadeSlideIn  { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
         * { box-sizing:border-box; margin:0; padding:0; }
         ::-webkit-scrollbar{width:4px}
         ::-webkit-scrollbar-track{background:transparent}
         ::-webkit-scrollbar-thumb{background:#7C3AED44;border-radius:2px}
       `}</style>
 
-      {/* Gate modal */}
-      {gate && (
-        <ApprovalGate
-          score={gate.score}
-          verificationOutput={gate.verificationOutput}
-          onApprove={handleApprove}
-          onReject={handleReject}
-          onSteer={handleSteer}
-        />
-      )}
+      {gate && <ApprovalGate score={gate.score} verificationOutput={gate.verificationOutput} onApprove={handleApprove} onReject={handleReject} onSteer={handleSteer}/>}
 
       {/* Header */}
-      <div style={{ maxWidth: 900, margin: "0 auto 28px" }}>
+      <div style={{ maxWidth: 1200, margin: "0 auto 28px" }}>
         <h1 style={{ fontSize: 28, fontWeight: 800, color: "#f1f5f9", marginBottom: 4 }}>
           Chain<span style={{ color: "#7C3AED" }}>Mind</span>
         </h1>
-        <p style={{ fontSize: 12, color: "#334155", fontFamily: "monospace" }}>
-          v2 · Conditional Approval Gate added
-        </p>
+        <p style={{ fontSize: 12, color: "#334155", fontFamily: "monospace" }}>v3 · ThoughtTrace panel added</p>
       </div>
 
       {/* Goal input */}
-      <div style={{ maxWidth: 900, margin: "0 auto 24px" }}>
+      <div style={{ maxWidth: 1200, margin: "0 auto 24px" }}>
         <textarea
-          value={goal}
-          onChange={e => setGoal(e.target.value)}
-          placeholder="Enter your research goal…"
-          rows={3}
-          style={{
-            width: "100%", background: "rgba(8,8,26,0.9)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            borderRadius: 10, padding: "12px 14px",
-            color: "#f1f5f9", fontSize: 13, fontFamily: "monospace",
-            resize: "vertical", outline: "none",
-          }}
+          value={goal} onChange={e => setGoal(e.target.value)}
+          placeholder="Enter your research goal…" rows={3}
+          style={{ width:"100%", background:"rgba(8,8,26,0.9)", border:"1px solid rgba(255,255,255,0.06)", borderRadius:10, padding:"12px 14px", color:"#f1f5f9", fontSize:13, fontFamily:"monospace", resize:"vertical", outline:"none" }}
         />
         <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-          <button
-            onClick={run}
-            disabled={phase === "running" || !goal.trim()}
-            style={{
-              padding: "10px 24px",
-              background: phase === "running" ? "#1e293b" : "#7C3AED",
-              border: "none", borderRadius: 8,
-              color: "#fff", fontSize: 13, fontWeight: 700,
-              cursor: phase === "running" ? "not-allowed" : "pointer",
-              fontFamily: "monospace",
-            }}
-          >
+          <button onClick={run} disabled={phase==="running"||!goal.trim()} style={{ padding:"10px 24px", background:phase==="running"?"#1e293b":"#7C3AED", border:"none", borderRadius:8, color:"#fff", fontSize:13, fontWeight:700, cursor:phase==="running"?"not-allowed":"pointer", fontFamily:"monospace" }}>
             {phase === "running" ? "Running…" : "▶ Run Pipeline"}
           </button>
           {phase !== "idle" && (
-            <button
-              onClick={reset}
-              style={{
-                padding: "10px 20px", background: "transparent",
-                border: "1px solid rgba(255,255,255,0.08)",
-                borderRadius: 8, color: "#475569",
-                fontSize: 13, cursor: "pointer", fontFamily: "monospace",
-              }}
-            >Reset</button>
+            <button onClick={reset} style={{ padding:"10px 20px", background:"transparent", border:"1px solid rgba(255,255,255,0.08)", borderRadius:8, color:"#475569", fontSize:13, cursor:"pointer", fontFamily:"monospace" }}>Reset</button>
           )}
         </div>
       </div>
 
-      {/* Rejected banner */}
       {phase === "rejected" && (
-        <div style={{
-          maxWidth: 900, margin: "0 auto 16px",
-          padding: "12px 16px",
-          background: "rgba(248,113,113,0.08)",
-          border: "1px solid rgba(248,113,113,0.3)",
-          borderRadius: 10, color: "#f87171",
-          fontSize: 12, fontFamily: "monospace",
-        }}>
-          ✕ Pipeline rejected at gate. No report generated.
+        <div style={{ maxWidth:1200, margin:"0 auto 16px", padding:"12px 16px", background:"rgba(248,113,113,0.08)", border:"1px solid rgba(248,113,113,0.3)", borderRadius:10, color:"#f87171", fontSize:12, fontFamily:"monospace" }}>
+          ✕ Pipeline rejected at gate.
+        </div>
+      )}
+      {error && (
+        <div style={{ maxWidth:1200, margin:"0 auto 16px", padding:"10px 14px", background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.3)", borderRadius:8, color:"#f87171", fontSize:12, fontFamily:"monospace" }}>
+          ✕ {error}
         </div>
       )}
 
-      {/* Error */}
-      {error && (
-        <div style={{
-          maxWidth: 900, margin: "0 auto 16px",
-          padding: "10px 14px",
-          background: "rgba(239,68,68,0.08)",
-          border: "1px solid rgba(239,68,68,0.3)",
-          borderRadius: 8, color: "#f87171",
-          fontSize: 12, fontFamily: "monospace",
-        }}>✕ {error}</div>
-      )}
+      {/* Two-column layout */}
+      <div style={{ maxWidth: 1200, margin: "0 auto", display: "grid", gridTemplateColumns: "1fr 380px", gap: 20 }}>
 
-      {/* Agent grid */}
-      <div style={{
-        maxWidth: 900, margin: "0 auto",
-        display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14,
-      }}>
-        {AGENTS.map(agent => (
-          <AgentCard
-            key={agent.key}
-            agent={agent}
-            status={statuses[agent.key] || "pending"}
-            output={outputs[agent.key]}
-            isActive={statuses[agent.key] === "active"}
-          />
-        ))}
+        {/* Left — agent cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, alignContent: "start" }}>
+          {AGENTS.map(agent => (
+            <AgentCard key={agent.key} agent={agent} status={statuses[agent.key]||"pending"} output={outputs[agent.key]} isActive={statuses[agent.key]==="active"}/>
+          ))}
+        </div>
+
+        {/* Right — ThoughtTrace */}
+        <ThoughtTrace entries={trace}/>
       </div>
 
       {/* Final report */}
       {phase === "done" && outputs.report && (
-        <div style={{
-          maxWidth: 900, margin: "24px auto 0",
-          background: "rgba(8,8,26,0.9)",
-          border: "1px solid rgba(236,72,153,0.3)",
-          borderRadius: 14, padding: 20,
-        }}>
-          <div style={{ color: "#EC4899", fontSize: 10, fontFamily: "monospace", letterSpacing: 2, marginBottom: 12 }}>
-            FINAL REPORT
-          </div>
-          <div style={{ color: "#e2e8f0", fontSize: 13, lineHeight: 1.8, whiteSpace: "pre-wrap" }}>
-            {outputs.report}
-          </div>
+        <div style={{ maxWidth:1200, margin:"24px auto 0", background:"rgba(8,8,26,0.9)", border:"1px solid rgba(236,72,153,0.3)", borderRadius:14, padding:20 }}>
+          <div style={{ color:"#EC4899", fontSize:10, fontFamily:"monospace", letterSpacing:2, marginBottom:12 }}>FINAL REPORT</div>
+          <div style={{ color:"#e2e8f0", fontSize:13, lineHeight:1.8, whiteSpace:"pre-wrap" }}>{outputs.report}</div>
         </div>
       )}
     </div>
