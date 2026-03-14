@@ -1,9 +1,7 @@
-// ChainMind v9 — built on working v6 base
-// Added: Project selector, Employee sidebar, Provider selector, org workflow mode
-// All v6 features preserved intact
+// ChainMind v4 — workload persistence, skill gap alert, workload chart, overload protection, assignment history
 
 // ── Bundled Data ──────────────────────────────────────────────────────────────
-const EMPLOYEES = [
+const DEFAULT_EMPLOYEES = [
   { id:"EMP001", name:"Aarav Sharma",  role:"AI Engineer",        skills:["Python","LLMs","LangChain","ML"],           experience:4, workload:40, color:"#7C3AED" },
   { id:"EMP002", name:"Riya Patel",    role:"Data Scientist",     skills:["Python","Data Analysis","ML","Pandas"],     experience:3, workload:35, color:"#0EA5E9" },
   { id:"EMP003", name:"Vikram Singh",  role:"Backend Developer",  skills:["Node.js","APIs","Databases"],               experience:5, workload:50, color:"#10B981" },
@@ -11,6 +9,22 @@ const EMPLOYEES = [
   { id:"EMP005", name:"Karthik Rao",   role:"DevOps Engineer",    skills:["Docker","Kubernetes","AWS","CI/CD"],        experience:4, workload:45, color:"#6366F1" },
   { id:"EMP006", name:"Meera Nair",    role:"AI Researcher",      skills:["LLMs","NLP","RAG","Deep Learning"],         experience:6, workload:55, color:"#EC4899" },
 ];
+
+// ── localStorage helpers ──────────────────────────────────────────────────────
+function loadEmployees(){
+  try{ const s=localStorage.getItem("cm_employees"); if(s) return JSON.parse(s); }catch(e){}
+  return DEFAULT_EMPLOYEES;
+}
+function saveEmployees(list){
+  try{ localStorage.setItem("cm_employees",JSON.stringify(list)); }catch(e){}
+}
+function loadAssignmentHistory(){
+  try{ const s=localStorage.getItem("cm_history"); if(s) return JSON.parse(s); }catch(e){}
+  return [];
+}
+function saveAssignmentHistory(h){
+  try{ localStorage.setItem("cm_history",JSON.stringify(h)); }catch(e){}
+}
 
 const PROJECTS = [
   { id:"PRJ001", name:"AI Sales Assistant",         desc:"AI assistant that generates sales proposals automatically", skills:["LLM","NLP","APIs"],              deadline:30, priority:"High"   },
@@ -190,13 +204,13 @@ function MiniPreview(){
   },[]);
   useEffect(()=>{let f=0;const t=setInterval(()=>{f=(f+1.8)%100;setParticleT(f);},16);return()=>clearInterval(t);},[]);
   return (
-    <div style={{background:"rgba(5,5,18,.92)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:18,padding:"18px 20px",backdropFilter:"blur(28px)",boxShadow:"0 0 60px rgba(124,58,237,.15)",width:"100%",maxWidth:560}}>
+    <div style={{background:"var(--bg-panel)",border:"1px solid var(--border)",borderRadius:18,padding:"18px 20px",backdropFilter:"blur(28px)",boxShadow:"0 0 60px rgba(124,58,237,.15)",width:"100%",maxWidth:560}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
         <div style={{width:7,height:7,borderRadius:"50%",background:"#10B981",boxShadow:"0 0 8px #10B981",animation:"breathe 1s infinite"}}/>
-        <span style={{color:"#1e4a38",fontSize:9,fontFamily:"monospace",letterSpacing:2}}>LIVE ORCHESTRATION PREVIEW</span>
+        <span style={{color:"#4ade80",fontSize:9,fontFamily:"monospace",letterSpacing:2}}>LIVE ORCHESTRATION PREVIEW</span>
         <div style={{marginLeft:"auto",display:"flex",gap:10}}>
-          <span style={{color:"#1a2a3a",fontSize:9,fontFamily:"monospace"}}>{doneSet.size}/6 agents</span>
-          <span style={{color:"#1a3025",fontSize:9,fontFamily:"monospace"}}>⚡ cost-aware routing</span>
+          <span style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace"}}>{doneSet.size}/6 agents</span>
+          <span style={{color:"#4ade80",fontSize:9,fontFamily:"monospace"}}>⚡ cost-aware routing</span>
         </div>
       </div>
       <div style={{position:"relative",paddingBottom:6}}>
@@ -208,7 +222,7 @@ function MiniPreview(){
             const particleLeft=`calc(${segW*i+segW*0.78}% + ${segW*0.44}% * ${particleProgress.toFixed(4)})`;
             return(
               <div key={key}>
-                <div style={{position:"absolute",top:1,left:barLeft,width:barWidth,height:2,background:isDone?a.color+"55":"#1a1a30",borderRadius:1,transition:"background .4s"}}/>
+                <div style={{position:"absolute",top:1,left:barLeft,width:barWidth,height:2,background:isDone?a.color+"55":"#1e293b",borderRadius:1,transition:"background .4s"}}/>
                 {isActive&&<div style={{position:"absolute",top:1,left:barLeft,width:`calc(${barWidth} * ${(progress/100).toFixed(4)})`,height:2,background:a.color,borderRadius:1,transition:"width .04s linear",boxShadow:`0 0 6px ${a.color}`}}/>}
                 {(isActive||isDone)&&<div style={{position:"absolute",top:-2,left:particleLeft,transform:"translateX(-50%)",width:7,height:7,borderRadius:"50%",background:a.color,boxShadow:`0 0 8px ${a.color}, 0 0 16px ${a.color}66`,transition:isDone?"left .016s linear":"none",pointerEvents:"none"}}/>}
               </div>
@@ -226,28 +240,28 @@ function MiniPreview(){
                   {isActive&&<div style={{position:"absolute",inset:0,background:`linear-gradient(105deg,transparent 35%,${a.color}14 50%,transparent 65%)`,backgroundSize:"200% 100%",animation:"shimmer 1.4s linear infinite"}}/>}
                   {isDone&&!isActive&&<div style={{position:"absolute",inset:0,background:a.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,color:a.color,animation:"fadeIn .25s ease"}}>✓</div>}
                 </div>
-                <div style={{fontSize:8,fontFamily:"monospace",color:isActive?a.color:isDone?a.color+"88":"#1e2535",textAlign:"center",transition:"color .3s",letterSpacing:.5}}>{a.label.slice(0,5).toUpperCase()}</div>
+                <div style={{fontSize:8,fontFamily:"monospace",color:isActive?a.color:isDone?a.color+"88":"#64748b",textAlign:"center",transition:"color .3s",letterSpacing:.5}}>{a.label.slice(0,5).toUpperCase()}</div>
               </div>
             );
           })}
         </div>
       </div>
-      <div style={{marginTop:12,background:"rgba(3,3,12,.7)",borderRadius:10,padding:"10px 12px",height:72,overflow:"hidden",position:"relative",border:"1px solid rgba(255,255,255,0.04)"}}>
-        <div style={{position:"absolute",inset:0,background:"linear-gradient(180deg,rgba(3,3,12,.0) 0%,rgba(3,3,12,.85) 100%)",zIndex:1,borderRadius:10,pointerEvents:"none"}}/>
-        {log.length===0&&<div style={{color:"#1a1a30",fontSize:9,fontFamily:"monospace",paddingTop:4}}>Initialising agents…</div>}
+      <div style={{marginTop:12,background:"var(--bg-card)",borderRadius:10,padding:"10px 12px",height:72,overflow:"hidden",position:"relative",border:"1px solid var(--border-subtle)"}}>
+        <div style={{position:"absolute",inset:0,background:"linear-gradient(180deg,transparent 0%,var(--bg-card) 100%)",zIndex:1,borderRadius:10,pointerEvents:"none"}}/>
+        {log.length===0&&<div style={{color:"var(--text-dim)",fontSize:9,fontFamily:"monospace",paddingTop:4}}>Initialising agents…</div>}
         {[...log].reverse().slice(0,4).map((entry,i)=>{const a=AGENTS[entry.agent];return(
           <div key={i} style={{display:"flex",gap:7,alignItems:"center",marginBottom:5,opacity:Math.max(0.1,1-i*0.28),animation:i===0?"fadeSlideIn .25s ease":"none"}}>
             <span style={{fontSize:9}}>{a.avatar}</span>
             <span style={{color:a.color,fontSize:8,fontFamily:"monospace",fontWeight:600,width:48,flexShrink:0}}>{a.label.slice(0,6).toUpperCase()}</span>
-            <span style={{color:"#334155",fontSize:9,fontFamily:"monospace"}}>{entry.msg}</span>
+            <span style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace"}}>{entry.msg}</span>
           </div>
         );})}
       </div>
-      <div style={{display:"flex",gap:12,marginTop:10,paddingTop:10,borderTop:"1px solid rgba(255,255,255,0.04)"}}>
+      <div style={{display:"flex",gap:12,marginTop:10,paddingTop:10,borderTop:"1px solid var(--border-subtle)"}}>
         {[{label:"AGENTS",val:`${doneSet.size}/6`,color:"#818cf8"},{label:"MODEL ROUTING",val:"3-tier",color:"#34d399"},{label:"GATE",val:"active",color:"#fbbf24"},{label:"MEMORY",val:"live",color:"#a78bfa"}].map(m=>(
           <div key={m.label} style={{flex:1,textAlign:"center"}}>
             <div style={{color:m.color,fontSize:11,fontWeight:700,fontFamily:"monospace"}}>{m.val}</div>
-            <div style={{color:"#1a2030",fontSize:7,fontFamily:"monospace",letterSpacing:1,marginTop:2}}>{m.label}</div>
+            <div style={{color:"var(--text-muted)",fontSize:7,fontFamily:"monospace",letterSpacing:1,marginTop:2}}>{m.label}</div>
           </div>
         ))}
       </div>
@@ -263,14 +277,14 @@ function ConfidenceGauge({score}){
   return (
     <div style={{textAlign:"center"}}>
       <svg width="100" height="60" style={{overflow:"visible"}}>
-        <path d={`M ${cx-r} ${cy} A ${r} ${r} 0 0 1 ${cx+r} ${cy}`} fill="none" stroke="#1a1a30" strokeWidth={strokeW} strokeLinecap="round"/>
+        <path d={`M ${cx-r} ${cy} A ${r} ${r} 0 0 1 ${cx+r} ${cy}`} fill="none" stroke="#1e293b" strokeWidth={strokeW} strokeLinecap="round"/>
         <path d={`M ${cx-r} ${cy} A ${r} ${r} 0 0 1 ${cx+r} ${cy}`} fill="none" stroke={color} strokeWidth={strokeW} strokeLinecap="round" strokeDasharray={`${dash} ${circumference}`} style={{filter:`drop-shadow(0 0 6px ${color})`,transition:"stroke-dasharray 1s ease"}}/>
         <line x1={cx} y1={cy} x2={cx+(r-4)*Math.cos(Math.PI-pct*Math.PI)} y2={cy-(r-4)*Math.sin(pct*Math.PI)} stroke={color} strokeWidth={2} strokeLinecap="round" style={{filter:`drop-shadow(0 0 4px ${color})`}}/>
         <circle cx={cx} cy={cy} r={4} fill={color} style={{filter:`drop-shadow(0 0 6px ${color})`}}/>
         <text x={cx} y={cy-10} textAnchor="middle" fill={color} fontSize="16" fontWeight="700" fontFamily="monospace">{animated}</text>
-        <text x={cx} y={cy+2} textAnchor="middle" fill="#334155" fontSize="8" fontFamily="monospace">CONFIDENCE</text>
-        <text x={cx-r+2} y={cy+12} fill="#334155" fontSize="8" fontFamily="monospace">0</text>
-        <text x={cx+r-8} y={cy+12} fill="#334155" fontSize="8" fontFamily="monospace">100</text>
+        <text x={cx} y={cy+2} textAnchor="middle" fill="#64748b" fontSize="8" fontFamily="monospace">CONFIDENCE</text>
+        <text x={cx-r+2} y={cy+12} fill="#64748b" fontSize="8" fontFamily="monospace">0</text>
+        <text x={cx+r-8} y={cy+12} fill="#64748b" fontSize="8" fontFamily="monospace">100</text>
       </svg>
       <div style={{fontSize:9,fontFamily:"monospace",color,marginTop:2,letterSpacing:1}}>{score>=80?"APPROVED":"NEEDS REVIEW"}</div>
     </div>
@@ -283,18 +297,18 @@ function SkeletonCard({index,agent}){
   const [vis,setVis]=useState(false);
   useEffect(()=>{const t=setTimeout(()=>setVis(true),index*60);return()=>clearTimeout(t);},[index]);
   return (
-    <div style={{position:"relative",borderRadius:14,overflow:"hidden",padding:"13px 15px",background:"rgba(8,8,20,0.6)",border:"1px solid rgba(255,255,255,0.04)",backdropFilter:"blur(20px)",opacity:vis?1:0,transform:vis?"translateY(0)":"translateY(10px)",transition:"all .4s cubic-bezier(.4,0,.2,1)"}}>
-      <div style={{position:"absolute",inset:0,background:"linear-gradient(105deg,transparent 30%,rgba(255,255,255,0.02) 50%,transparent 70%)",backgroundSize:"200% 100%",animation:"shimmer 2.5s linear infinite",pointerEvents:"none"}}/>
+    <div style={{position:"relative",borderRadius:14,overflow:"hidden",padding:"13px 15px",background:"var(--bg-card)",border:"1px solid var(--border-subtle)",backdropFilter:"blur(20px)",opacity:vis?1:0,transform:vis?"translateY(0)":"translateY(10px)",transition:"all .4s cubic-bezier(.4,0,.2,1)"}}>
+      <div style={{position:"absolute",inset:0,background:"linear-gradient(105deg,transparent 30%,rgba(128,128,128,0.06) 50%,transparent 70%)",backgroundSize:"200% 100%",animation:"shimmer 2.5s linear infinite",pointerEvents:"none"}}/>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-        <div style={{width:34,height:34,borderRadius:10,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.05)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,opacity:0.3}}>{a.avatar}</div>
+        <div style={{width:34,height:34,borderRadius:10,background:"rgba(128,128,128,0.07)",border:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,opacity:0.3}}>{a.avatar}</div>
         <div style={{flex:1}}>
-          <div style={{height:10,width:"58%",background:"rgba(255,255,255,0.05)",borderRadius:4,marginBottom:6}}/>
-          <div style={{height:8,width:"32%",background:"rgba(255,255,255,0.03)",borderRadius:3}}/>
+          <div style={{height:10,width:"58%",background:"rgba(128,128,128,0.1)",borderRadius:4,marginBottom:6}}/>
+          <div style={{height:8,width:"32%",background:"rgba(128,128,128,0.07)",borderRadius:3}}/>
         </div>
-        <div style={{width:9,height:9,borderRadius:"50%",border:"1.5px solid rgba(255,255,255,0.08)"}}/>
+        <div style={{width:9,height:9,borderRadius:"50%",border:"1.5px solid rgba(128,128,128,0.15)"}}/>
       </div>
-      <div style={{height:8,width:"82%",background:"rgba(255,255,255,0.04)",borderRadius:3,marginBottom:4}}/>
-      <div style={{height:8,width:"52%",background:"rgba(255,255,255,0.03)",borderRadius:3}}/>
+      <div style={{height:8,width:"82%",background:"rgba(128,128,128,0.08)",borderRadius:3,marginBottom:4}}/>
+      <div style={{height:8,width:"52%",background:"rgba(128,128,128,0.06)",borderRadius:3}}/>
     </div>
   );
 }
@@ -307,17 +321,17 @@ function AgentCard({agent,status,task,model,isActive,progress,index,realOutput,t
   useEffect(()=>{if(!isActive||!tokenCount){setDisplayTokens(tokenCount||0);return;}let n=0;const t=setInterval(()=>{n+=Math.ceil(tokenCount/30);setDisplayTokens(Math.min(n,tokenCount));if(n>=tokenCount)clearInterval(t);},50);return()=>clearInterval(t);},[isActive,tokenCount]);
   return (
     <div onMouseEnter={()=>onHover&&onHover(agent)} onMouseLeave={()=>onHover&&onHover(null)}
-      style={{position:"relative",borderRadius:14,overflow:"hidden",padding:"13px 15px",background:isActive?a.bg:status==="done"?a.bg.replace(".08",".04"):"rgba(8,8,20,0.85)",border:`1px solid ${isActive?a.color:status==="done"?a.color+"44":"rgba(255,255,255,0.05)"}`,boxShadow:isActive?`0 0 32px ${a.glow}35,0 0 64px ${a.glow}12`:status==="done"?`0 0 10px ${a.glow}18`:"none",transition:"all .4s cubic-bezier(.4,0,.2,1)",opacity:vis?1:0,transform:vis?"translateY(0)":"translateY(14px)",backdropFilter:"blur(20px)"}}>
+      style={{position:"relative",borderRadius:14,overflow:"hidden",padding:"13px 15px",background:isActive?a.bg:status==="done"?a.bg.replace(".08",".04"):"var(--bg-card)",border:`1px solid ${isActive?a.color:status==="done"?a.color+"44":"var(--border)"}`,boxShadow:isActive?`0 0 32px ${a.glow}35,0 0 64px ${a.glow}12`:status==="done"?`0 0 10px ${a.glow}18`:"none",transition:"all .4s cubic-bezier(.4,0,.2,1)",opacity:vis?1:0,transform:vis?"translateY(0)":"translateY(14px)",backdropFilter:"blur(20px)"}}>
       {isActive&&<div style={{position:"absolute",top:0,left:0,right:0,height:2,background:`linear-gradient(90deg,transparent,${a.color},transparent)`,animation:"scanline 1.6s linear infinite"}}/>}
       {isActive&&<div style={{position:"absolute",bottom:0,left:0,height:2,background:`linear-gradient(90deg,${a.color},${a.glow})`,width:`${progress}%`,transition:"width .1s linear",boxShadow:`0 0 10px ${a.color}`}}/>}
       {isActive&&<div style={{position:"absolute",inset:0,background:`linear-gradient(105deg,transparent 40%,${a.color}07 50%,transparent 60%)`,backgroundSize:"200% 100%",animation:"shimmer 2.2s linear infinite",pointerEvents:"none"}}/>}
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:7}}>
         <div style={{width:34,height:34,borderRadius:10,fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",background:isActive?`${a.glow}28`:`${a.glow}12`,border:`1px solid ${isActive?a.color:a.color+"44"}`,boxShadow:isActive?`0 0 18px ${a.glow}55`:"none",transition:"all .3s",animation:isActive?"float 2.5s ease-in-out infinite":"none"}}>{a.avatar}</div>
         <div style={{flex:1}}>
-          <div style={{color:"#f1f5f9",fontWeight:700,fontSize:12}}>{a.label} Agent</div>
+          <div style={{color:"var(--text-primary)",fontWeight:700,fontSize:12}}>{a.label} Agent</div>
           <div style={{display:"flex",gap:5,marginTop:2}}>
             <span style={{fontSize:9,fontFamily:"monospace",letterSpacing:1,color:tier.color,background:`${tier.color}20`,padding:"1px 5px",borderRadius:3}}>{tier.label}</span>
-            <span style={{fontSize:9,color:"#2a3040",fontFamily:"monospace"}}>{tier.desc}</span>
+            <span style={{fontSize:9,color:"var(--text-muted)",fontFamily:"monospace"}}>{tier.desc}</span>
           </div>
         </div>
         <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:3}}>
@@ -329,13 +343,13 @@ function AgentCard({agent,status,task,model,isActive,progress,index,realOutput,t
           {(isActive||status==="done")&&tokenCount>0&&<div style={{fontSize:9,fontFamily:"monospace",color:tier.color,background:`${tier.color}15`,padding:"1px 5px",borderRadius:4}}>↑{displayTokens}t</div>}
         </div>
       </div>
-      <div style={{color:isActive?"#94a3b8":"#3a4060",fontSize:11,fontFamily:"'DM Mono',monospace",lineHeight:1.5}}>{isActive?<Typewriter text={task} speed={22} color="#94a3b8"/>:task}</div>
+      <div style={{color:isActive?"#94a3b8":"#64748b",fontSize:11,fontFamily:"'DM Mono',monospace",lineHeight:1.5}}>{isActive?<Typewriter text={task} speed={22} color="#94a3b8"/>:task}</div>
       {status==="done"&&realOutput&&(
         <div style={{marginTop:7}}>
           <button onClick={()=>setExpanded(!expanded)} style={{background:"rgba(52,211,153,0.05)",border:"1px solid rgba(52,211,153,0.12)",borderRadius:6,padding:"4px 9px",fontSize:9,color:"#34d399",fontFamily:"monospace",cursor:"pointer",width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between"}}>
             <span>✓ View output</span><span>{expanded?"▲":"▼"}</span>
           </button>
-          {expanded&&<div style={{marginTop:5,background:"rgba(3,3,12,.8)",borderRadius:7,padding:9,fontSize:10,fontFamily:"monospace",color:"#64748b",lineHeight:1.7,maxHeight:100,overflowY:"auto",border:"1px solid rgba(255,255,255,0.04)",animation:"fadeSlideIn .3s ease"}}>{realOutput.substring(0,350)}{realOutput.length>350?"…":""}</div>}
+          {expanded&&<div style={{marginTop:5,background:"var(--bg-panel)",borderRadius:7,padding:9,fontSize:10,fontFamily:"monospace",color:"var(--text-muted)",lineHeight:1.7,maxHeight:100,overflowY:"auto",border:"1px solid var(--border-subtle)",animation:"fadeSlideIn .3s ease"}}>{realOutput.substring(0,350)}{realOutput.length>350?"…":""}</div>}
         </div>
       )}
       {status==="error"&&<div style={{marginTop:7,padding:"4px 8px",background:"rgba(244,114,182,0.05)",borderRadius:5,border:"1px solid rgba(244,114,182,0.12)",fontSize:9,color:"#f472b6",fontFamily:"monospace"}}>✕ Check console</div>}
@@ -348,16 +362,16 @@ function ThoughtTrace({entries,isRunning,hoveredAgent}){
   const endRef=useRef(null);
   useEffect(()=>endRef.current?.scrollIntoView({behavior:"smooth"}),[entries]);
   return (
-    <div style={{background:"rgba(3,3,14,0.92)",border:"1px solid rgba(255,255,255,0.05)",borderRadius:14,padding:16,height:340,overflowY:"auto",backdropFilter:"blur(20px)",fontFamily:"'DM Mono',monospace",fontSize:11}}>
+    <div style={{background:"var(--bg-panel)",border:"1px solid var(--border)",borderRadius:14,padding:16,height:340,overflowY:"auto",backdropFilter:"blur(20px)",fontFamily:"'DM Mono',monospace",fontSize:11}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-        <div style={{width:6,height:6,borderRadius:"50%",background:isRunning?"#7C3AED":"#1a1a30",boxShadow:isRunning?"0 0 8px #7C3AED":"none",animation:isRunning?"breathe 1s infinite":"none"}}/>
-        <span style={{color:"#1e2a3a",fontSize:10,letterSpacing:2}}>THOUGHT TRACE</span>
+        <div style={{width:6,height:6,borderRadius:"50%",background:isRunning?"#7C3AED":"#1e293b",boxShadow:isRunning?"0 0 8px #7C3AED":"none",animation:isRunning?"breathe 1s infinite":"none"}}/>
+        <span style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2}}>THOUGHT TRACE</span>
         {isRunning&&<span style={{marginLeft:"auto",color:"#7C3AED",fontSize:9,animation:"blink 1s infinite"}}>● LIVE</span>}
       </div>
       {entries.length===0&&(
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"80%",gap:12,paddingTop:20}}>
           <div style={{fontSize:28,opacity:0.15,animation:"float 3s ease-in-out infinite"}}>🧠</div>
-          <div style={{color:"#1a2030",fontSize:10,fontFamily:"monospace",textAlign:"center",lineHeight:1.8}}>Thought trace will appear here<br/>as each agent reasons through your goal</div>
+          <div style={{color:"var(--text-secondary)",fontSize:10,fontFamily:"monospace",textAlign:"center",lineHeight:1.8}}>Thought trace will appear here<br/>as each agent reasons through your goal</div>
           <div style={{display:"flex",gap:6,marginTop:4}}>{["planner","research","execution","verification","memory","report"].map(k=>(<div key={k} style={{width:6,height:6,borderRadius:"50%",background:AGENTS[k].color,opacity:0.12}}/>))}</div>
         </div>
       )}
@@ -369,9 +383,9 @@ function ThoughtTrace({entries,isRunning,hoveredAgent}){
               <span style={{fontSize:11}}>{a?.avatar}</span>
               <span style={{color:a?.color,fontWeight:600,fontSize:10,letterSpacing:.5}}>{a?.label?.toUpperCase()}</span>
               {e.model&&<span style={{color:MODEL_TIERS[e.model]?.color,fontSize:9,background:`${MODEL_TIERS[e.model]?.color}18`,padding:"1px 5px",borderRadius:3}}>{e.model.toUpperCase()}</span>}
-              <span style={{color:"#1a2030",fontSize:9,marginLeft:"auto"}}>{new Date(e.ts).toLocaleTimeString()}</span>
+              <span style={{color:"var(--text-muted)",fontSize:9,marginLeft:"auto"}}>{new Date(e.ts).toLocaleTimeString()}</span>
             </div>
-            <div style={{color:"#94a3b8",paddingLeft:18,borderLeft:`2px solid ${a?.color||"#333"}${isHighlighted?"88":"28"}`,lineHeight:1.6,transition:"border-color .2s"}}>
+            <div style={{color:"var(--text-secondary)",paddingLeft:18,borderLeft:`2px solid ${a?.color||"#333"}${isHighlighted?"88":"28"}`,lineHeight:1.6,transition:"border-color .2s"}}>
               {isLast&&isRunning?<Typewriter text={e.msg} speed={10} color="#94a3b8"/>:e.msg}
             </div>
           </div>
@@ -410,15 +424,15 @@ function MCPPanel({active,pulsing,activeAgent}){
     off:    {bg:"rgba(8,8,20,0.7)",border:"rgba(255,255,255,0.04)",shadow:"none",scale:"scale(1)",filter:"none",dotAnim:null},
   };
   return (
-    <div style={{background:"rgba(3,3,14,0.92)",border:"1px solid rgba(255,255,255,0.05)",borderRadius:14,padding:14,backdropFilter:"blur(20px)"}}>
+    <div style={{background:"var(--bg-panel)",border:"1px solid var(--border)",borderRadius:14,padding:14,backdropFilter:"blur(20px)"}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
         <span style={{fontSize:9,letterSpacing:1.5,color:"#38bdf8",background:"rgba(14,165,233,0.1)",padding:"2px 7px",borderRadius:4,border:"1px solid rgba(14,165,233,0.18)"}}>MCP</span>
-        <span style={{color:"#475569",fontSize:11,fontWeight:600}}>Interoperability Layer</span>
+        <span style={{color:"var(--text-dim)",fontSize:11,fontWeight:600}}>Interoperability Layer</span>
         {pulsing.length>0&&<span style={{marginLeft:"auto",fontSize:8,fontFamily:"monospace",color:"#38bdf8",animation:"blink 0.8s infinite",letterSpacing:1}}>● CALLING</span>}
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7}}>
         {tools.map(t=>{
-          const state=getState(t.id),s=stateStyles[state],toolColor=state==="calling"?t.color:state==="active"?t.color:"#2a3040";
+          const state=getState(t.id),s=stateStyles[state],toolColor=state==="calling"?t.color:state==="active"?t.color:"var(--text-muted)";
           return(
             <div key={t.id} style={{background:s.bg,border:`1px solid ${s.border}`,borderRadius:9,padding:"9px 6px",textAlign:"center",boxShadow:s.shadow,transition:"all .3s cubic-bezier(.4,0,.2,1)",transform:s.scale,position:"relative",overflow:"hidden"}}>
               {state==="calling"&&<div style={{position:"absolute",inset:-1,borderRadius:9,border:`1px solid ${t.color}`,animation:"ripple 1s ease-out infinite",pointerEvents:"none"}}/>}
@@ -458,25 +472,25 @@ function RightPanel({entries,activeModel,stats,tokenCounts,isRunning,memRef,agen
   const agentCostData=WORKFLOW.map(w=>{const tok=agentTokens?.[w.agent]||0,tier=MODEL_TIERS[w.model],actual=tok*tier.costPer1k/1000,frontier=tok*MODEL_TIERS.frontier.costPer1k/1000;return{agent:w.agent,label:AGENTS[w.agent].label,color:AGENTS[w.agent].color,tier:w.model,actual,frontier,tok};});
   const maxFrontier=Math.max(...agentCostData.map(d=>d.frontier),0.001);
   return (
-    <div ref={memRef} style={{background:"rgba(3,3,14,0.92)",border:"1px solid rgba(255,255,255,0.05)",borderRadius:14,backdropFilter:"blur(20px)",overflow:"hidden"}}>
-      <div style={{display:"flex",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+    <div ref={memRef} style={{background:"var(--bg-panel)",border:"1px solid var(--border)",borderRadius:14,backdropFilter:"blur(20px)",overflow:"hidden"}}>
+      <div style={{display:"flex",borderBottom:"1px solid var(--border)"}}>
         {[{id:"memory",label:"⊜ Memory",color:"#818cf8"},{id:"routing",label:"⟳ Routing",color:"#f472b6"},{id:"cost",label:"📊 Cost",color:"#34d399"}].map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:"10px 0",background:tab===t.id?`${t.color}10`:"transparent",border:"none",borderBottom:`2px solid ${tab===t.id?t.color:"transparent"}`,color:tab===t.id?t.color:"#334155",fontSize:10,fontFamily:"monospace",fontWeight:600,cursor:"pointer",transition:"all .2s",letterSpacing:.5}}>{t.label}</button>
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:"10px 0",background:tab===t.id?`${t.color}10`:"transparent",border:"none",borderBottom:`2px solid ${tab===t.id?t.color:"transparent"}`,color:tab===t.id?t.color:"var(--text-muted)",fontSize:10,fontFamily:"monospace",fontWeight:600,cursor:"pointer",transition:"all .2s",letterSpacing:.5}}>{t.label}</button>
         ))}
       </div>
       <div style={{padding:14}}>
         {tab==="memory"&&(
           <div>
-            {entries.length>0&&<div style={{color:"#2a3a4a",fontSize:9,fontFamily:"monospace",marginBottom:10}}>{entries.length} entries stored</div>}
+            {entries.length>0&&<div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",marginBottom:10}}>{entries.length} entries stored</div>}
             {tiers.map((tier,ti)=>{const te=entries.filter(e=>e.tier===ti);return(
               <div key={ti} style={{marginBottom:10}}>
                 <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:4}}>
                   <div style={{width:5,height:5,borderRadius:1,background:cols[ti],opacity:.7}}/>
-                  <span style={{color:"#1e2a3a",fontSize:9,letterSpacing:1.5,fontFamily:"monospace"}}>{tier.toUpperCase()}</span>
-                  <span style={{color:"#141420",fontSize:9,marginLeft:"auto",fontFamily:"monospace"}}>{te.length}</span>
+                  <span style={{color:"var(--text-muted)",fontSize:9,letterSpacing:1.5,fontFamily:"monospace"}}>{tier.toUpperCase()}</span>
+                  <span style={{color:"var(--text-muted)",fontSize:9,marginLeft:"auto",fontFamily:"monospace"}}>{te.length}</span>
                 </div>
-                {te.length===0?<div style={{color:"#141420",fontSize:9,fontFamily:"monospace",paddingLeft:10,fontStyle:"italic"}}>nothing stored yet…</div>
-                 :te.map((e,i)=><div key={i} style={{background:`${cols[ti]}08`,borderRadius:5,padding:"5px 9px",marginBottom:3,border:`1px solid ${cols[ti]}18`,fontSize:9,fontFamily:"monospace",color:"#94a3b8",animation:"fadeSlideIn .4s ease"}}><span style={{color:cols[ti]}}>▸ </span>{e.text}</div>)}
+                {te.length===0?<div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",paddingLeft:10,fontStyle:"italic"}}>nothing stored yet…</div>
+                 :te.map((e,i)=><div key={i} style={{background:`${cols[ti]}08`,borderRadius:5,padding:"5px 9px",marginBottom:3,border:`1px solid ${cols[ti]}18`,fontSize:9,fontFamily:"monospace",color:"var(--text-secondary)",animation:"fadeSlideIn .4s ease"}}><span style={{color:cols[ti]}}>▸ </span>{e.text}</div>)}
               </div>
             );})}
           </div>
@@ -486,17 +500,17 @@ function RightPanel({entries,activeModel,stats,tokenCounts,isRunning,memRef,agen
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
               <div style={{background:"rgba(52,211,153,0.06)",border:"1px solid rgba(52,211,153,0.12)",borderRadius:9,padding:"8px",textAlign:"center"}}>
                 <div style={{color:"#34d399",fontSize:15,fontWeight:800,fontFamily:"monospace"}}>${totalCost.toFixed(4)}</div>
-                <div style={{color:"#1e3a2a",fontSize:8,fontFamily:"monospace",letterSpacing:1,marginTop:1}}>ACTUAL</div>
+                <div style={{color:"#4ade80",fontSize:8,fontFamily:"monospace",letterSpacing:1,marginTop:1}}>ACTUAL</div>
               </div>
               <div style={{background:"rgba(124,58,237,0.06)",border:"1px solid rgba(124,58,237,0.12)",borderRadius:9,padding:"8px",textAlign:"center"}}>
                 <div style={{color:"#a78bfa",fontSize:15,fontWeight:800,fontFamily:"monospace"}}>{savePct}%</div>
-                <div style={{color:"#2a1a4a",fontSize:8,fontFamily:"monospace",letterSpacing:1,marginTop:1}}>SAVED</div>
+                <div style={{color:"#a78bfa",fontSize:8,fontFamily:"monospace",letterSpacing:1,marginTop:1}}>SAVED</div>
               </div>
             </div>
             {isHyperEfficient&&(
               <div style={{marginBottom:10,padding:"7px 10px",borderRadius:8,background:"linear-gradient(135deg,rgba(52,211,153,0.08),rgba(99,102,241,0.08))",border:"1px solid rgba(52,211,153,0.3)",display:"flex",alignItems:"center",gap:7,boxShadow:"0 0 16px rgba(52,211,153,0.1)",animation:"fadeSlideIn .4s ease"}}>
                 <span style={{animation:"float 2s ease-in-out infinite"}}>⚡</span>
-                <div style={{flex:1}}><div style={{color:"#34d399",fontSize:9,fontWeight:700,fontFamily:"monospace",letterSpacing:.5}}>HYPER-EFFICIENT</div><div style={{color:"#1e3a2a",fontSize:8,fontFamily:"monospace"}}>{savePct}% cheaper vs all-Frontier</div></div>
+                <div style={{flex:1}}><div style={{color:"#34d399",fontSize:9,fontWeight:700,fontFamily:"monospace",letterSpacing:.5}}>HYPER-EFFICIENT</div><div style={{color:"#4ade80",fontSize:8,fontFamily:"monospace"}}>{savePct}% cheaper vs all-Frontier</div></div>
                 <div style={{width:7,height:7,borderRadius:"50%",background:"#34d399",boxShadow:"0 0 8px #34d399",animation:"breathe 1s infinite"}}/>
               </div>
             )}
@@ -505,14 +519,14 @@ function RightPanel({entries,activeModel,stats,tokenCounts,isRunning,memRef,agen
                 <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:count>0?4:0}}>
                   <div style={{width:6,height:6,borderRadius:"50%",background:tier.color,boxShadow:on?`0 0 8px ${tier.color}`:"none",animation:on?"breathe 1s infinite":"none"}}/>
                   <span style={{color:tier.color,fontSize:9,fontWeight:700,fontFamily:"monospace",width:52}}>{tier.label}</span>
-                  <span style={{color:"#2a3040",fontSize:8,fontFamily:"monospace",flex:1}}>{tier.desc}</span>
-                  <span style={{color:"#3a4555",fontSize:9,fontFamily:"monospace"}}>{count}x</span>
+                  <span style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",flex:1}}>{tier.desc}</span>
+                  <span style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace"}}>{count}x</span>
                   {tokens>0&&<span style={{color:"#2a3540",fontSize:8,fontFamily:"monospace"}}>${cost.toFixed(5)}</span>}
                 </div>
-                {count>0&&<div style={{height:2,background:"#0a0a18",borderRadius:1,overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,background:`linear-gradient(90deg,${tier.color}70,${tier.color})`,borderRadius:1,transition:"width .5s ease",boxShadow:`0 0 5px ${tier.color}`}}/></div>}
+                {count>0&&<div style={{height:2,background:"var(--bg-track)",borderRadius:1,overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,background:`linear-gradient(90deg,${tier.color}70,${tier.color})`,borderRadius:1,transition:"width .5s ease",boxShadow:`0 0 5px ${tier.color}`}}/></div>}
               </div>
             );})}
-            {isRunning&&<div style={{marginTop:6,fontSize:8,color:"#1a3025",fontFamily:"monospace",textAlign:"right",animation:"blink 1.5s infinite"}}>● tracking live</div>}
+            {isRunning&&<div style={{marginTop:6,fontSize:8,color:"#4ade80",fontFamily:"monospace",textAlign:"right",animation:"blink 1.5s infinite"}}>● tracking live</div>}
           </div>
         )}
         {tab==="cost"&&(
@@ -521,13 +535,13 @@ function RightPanel({entries,activeModel,stats,tokenCounts,isRunning,memRef,agen
               {[{label:"ACTUAL",val:`$${totalCost.toFixed(4)}`,color:"#34d399"},{label:"ALL-FRONTIER",val:`$${frontierCost.toFixed(4)}`,color:"#f472b6"},{label:"SAVED",val:`${savePct}%`,color:"#fbbf24"}].map(c=>(
                 <div key={c.label} style={{background:`${c.color}08`,border:`1px solid ${c.color}18`,borderRadius:8,padding:"7px 6px",textAlign:"center"}}>
                   <div style={{color:c.color,fontSize:13,fontWeight:800,fontFamily:"monospace",lineHeight:1}}>{c.val}</div>
-                  <div style={{color:"#1e2a3a",fontSize:7,fontFamily:"monospace",letterSpacing:.8,marginTop:2}}>{c.label}</div>
+                  <div style={{color:"var(--text-muted)",fontSize:7,fontFamily:"monospace",letterSpacing:.8,marginTop:2}}>{c.label}</div>
                 </div>
               ))}
             </div>
             <div style={{marginBottom:8,display:"flex",justifyContent:"flex-end",gap:12}}>
-              <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:8,height:8,borderRadius:2,background:"#34d399"}}/><span style={{color:"#334155",fontSize:8,fontFamily:"monospace"}}>actual</span></div>
-              <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:8,height:8,borderRadius:2,background:"#f472b688"}}/><span style={{color:"#334155",fontSize:8,fontFamily:"monospace"}}>all-frontier</span></div>
+              <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:8,height:8,borderRadius:2,background:"#34d399"}}/><span style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>actual</span></div>
+              <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:8,height:8,borderRadius:2,background:"#f472b688"}}/><span style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>all-frontier</span></div>
             </div>
             {agentCostData.map((d,i)=>{
               const hasData=d.tok>0,actualPct=maxFrontier>0?(d.actual/maxFrontier*100):0,frontierPct=maxFrontier>0?(d.frontier/maxFrontier*100):0,saving=d.frontier>0?Math.round((1-d.actual/d.frontier)*100):0;
@@ -537,13 +551,13 @@ function RightPanel({entries,activeModel,stats,tokenCounts,isRunning,memRef,agen
                     <span style={{color:d.color,fontSize:9,fontFamily:"monospace",fontWeight:700}}>{d.label}</span>
                     <div style={{display:"flex",alignItems:"center",gap:6}}>
                       {hasData&&saving>0&&<span style={{color:"#34d399",fontSize:8,fontFamily:"monospace",background:"rgba(52,211,153,0.1)",padding:"1px 5px",borderRadius:3}}>-{saving}%</span>}
-                      <span style={{color:"#334155",fontSize:8,fontFamily:"monospace"}}>{d.tok>0?`${d.tok}tok`:""}</span>
+                      <span style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>{d.tok>0?`${d.tok}tok`:""}</span>
                     </div>
                   </div>
-                  <div style={{position:"relative",height:14,background:"rgba(10,10,24,0.8)",borderRadius:3,border:"1px solid rgba(255,255,255,0.03)",marginBottom:2}}>
+                  <div style={{position:"relative",height:14,background:"var(--bg-card)",borderRadius:3,border:"1px solid rgba(255,255,255,0.03)",marginBottom:2}}>
                     <div style={{position:"absolute",left:0,width:`${frontierPct}%`,height:"100%",background:"rgba(244,114,182,0.15)",borderRadius:3,border:"1px solid rgba(244,114,182,0.15)"}}/>
                     {hasData&&<div style={{position:"absolute",left:0,width:`${actualPct}%`,height:"100%",background:`linear-gradient(90deg,${d.color}70,${d.color}cc)`,borderRadius:3,boxShadow:`0 0 6px ${d.color}44`,transition:"width .6s ease",minWidth:hasData?4:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4}}>{actualPct>15&&<span style={{color:"#fff",fontSize:7,fontFamily:"monospace",fontWeight:700}}>${d.actual.toFixed(5)}</span>}</div>}
-                    {!hasData&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",paddingLeft:6}}><span style={{color:"#1e2a3a",fontSize:8,fontFamily:"monospace"}}>waiting…</span></div>}
+                    {!hasData&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",paddingLeft:6}}><span style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>waiting…</span></div>}
                   </div>
                 </div>
               );
@@ -551,10 +565,10 @@ function RightPanel({entries,activeModel,stats,tokenCounts,isRunning,memRef,agen
             {savePct>0&&(
               <div style={{marginTop:10,padding:"8px 10px",borderRadius:8,background:"linear-gradient(135deg,rgba(52,211,153,0.06),rgba(99,102,241,0.06))",border:"1px solid rgba(52,211,153,0.2)",display:"flex",alignItems:"center",gap:8}}>
                 <span style={{fontSize:16}}>⚡</span>
-                <div><div style={{color:"#34d399",fontSize:9,fontWeight:700,fontFamily:"monospace"}}>ROUTING SAVED ${saved.toFixed(5)}</div><div style={{color:"#1e3a2a",fontSize:8,fontFamily:"monospace"}}>vs running all 6 agents on Frontier models</div></div>
+                <div><div style={{color:"#34d399",fontSize:9,fontWeight:700,fontFamily:"monospace"}}>ROUTING SAVED ${saved.toFixed(5)}</div><div style={{color:"#4ade80",fontSize:8,fontFamily:"monospace"}}>vs running all 6 agents on Frontier models</div></div>
               </div>
             )}
-            {isRunning&&<div style={{marginTop:8,fontSize:8,color:"#1a3025",fontFamily:"monospace",textAlign:"right",animation:"blink 1.5s infinite"}}>● accumulating live</div>}
+            {isRunning&&<div style={{marginTop:8,fontSize:8,color:"#4ade80",fontFamily:"monospace",textAlign:"right",animation:"blink 1.5s infinite"}}>● accumulating live</div>}
           </div>
         )}
       </div>
@@ -568,21 +582,21 @@ function TimelineView({timings,totalMs,agentTokens}){
   const totalSec=(totalMs/1000).toFixed(1);
   const slowest=timings.reduce((a,b)=>b.duration>a.duration?b:a,timings[0]);
   return(
-    <div style={{background:"rgba(3,3,14,0.95)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:14,padding:"16px 18px",backdropFilter:"blur(20px)",marginTop:14,boxShadow:"0 4px 32px rgba(0,0,0,0.4)"}}>
+    <div style={{background:"var(--bg-panel)",border:"1px solid var(--border)",borderRadius:14,padding:"16px 18px",backdropFilter:"blur(20px)",marginTop:14,boxShadow:"0 4px 32px rgba(0,0,0,0.4)"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <div style={{width:6,height:6,borderRadius:"50%",background:"#34d399",boxShadow:"0 0 8px #34d399",animation:"breathe 1.4s infinite"}}/>
-          <span style={{color:"#94a3b8",fontSize:10,fontFamily:"monospace",letterSpacing:2,fontWeight:700}}>EXECUTION TIMELINE</span>
+          <span style={{color:"var(--text-secondary)",fontSize:10,fontFamily:"monospace",letterSpacing:2,fontWeight:700}}>EXECUTION TIMELINE</span>
         </div>
         <div style={{display:"flex",gap:16}}>
-          <div style={{textAlign:"right"}}><div style={{color:"#f1f5f9",fontSize:15,fontFamily:"monospace",fontWeight:800,lineHeight:1}}>{totalSec}s</div><div style={{color:"#334155",fontSize:8,fontFamily:"monospace",letterSpacing:1}}>TOTAL</div></div>
-          <div style={{textAlign:"right"}}><div style={{color:"#fbbf24",fontSize:15,fontFamily:"monospace",fontWeight:800,lineHeight:1}}>{(slowest.duration/1000).toFixed(1)}s</div><div style={{color:"#334155",fontSize:8,fontFamily:"monospace",letterSpacing:1}}>SLOWEST</div></div>
-          <div style={{textAlign:"right"}}><div style={{color:"#a78bfa",fontSize:15,fontFamily:"monospace",fontWeight:800,lineHeight:1}}>~{((totalMs*0.45)/1000).toFixed(1)}s</div><div style={{color:"#334155",fontSize:8,fontFamily:"monospace",letterSpacing:1}}>IF PARALLEL</div></div>
+          <div style={{textAlign:"right"}}><div style={{color:"var(--text-primary)",fontSize:15,fontFamily:"monospace",fontWeight:800,lineHeight:1}}>{totalSec}s</div><div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:1}}>TOTAL</div></div>
+          <div style={{textAlign:"right"}}><div style={{color:"#fbbf24",fontSize:15,fontFamily:"monospace",fontWeight:800,lineHeight:1}}>{(slowest.duration/1000).toFixed(1)}s</div><div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:1}}>SLOWEST</div></div>
+          <div style={{textAlign:"right"}}><div style={{color:"#a78bfa",fontSize:15,fontFamily:"monospace",fontWeight:800,lineHeight:1}}>~{((totalMs*0.45)/1000).toFixed(1)}s</div><div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:1}}>IF PARALLEL</div></div>
         </div>
       </div>
       <div style={{paddingLeft:72,marginBottom:6}}>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-          {[0,25,50,75,100].map(pct=>(<div key={pct} style={{fontSize:7,color:"#1e2a3a",fontFamily:"monospace",transform:"translateX(-50%)",userSelect:"none"}}>{pct===0?"0s":pct===100?totalSec+"s":((totalMs/1000*pct/100).toFixed(1))+"s"}</div>))}
+          {[0,25,50,75,100].map(pct=>(<div key={pct} style={{fontSize:7,color:"var(--text-muted)",fontFamily:"monospace",transform:"translateX(-50%)",userSelect:"none"}}>{pct===0?"0s":pct===100?totalSec+"s":((totalMs/1000*pct/100).toFixed(1))+"s"}</div>))}
         </div>
         <div style={{height:1,background:"linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent)"}}/>
       </div>
@@ -591,20 +605,20 @@ function TimelineView({timings,totalMs,agentTokens}){
         return(
           <div key={i} style={{display:"flex",alignItems:"center",gap:10,marginBottom:7,animation:`fadeSlideIn .4s ease ${i*0.07}s both`}}>
             <div style={{width:62,flexShrink:0,textAlign:"right"}}><span style={{color:a.color,fontSize:9,fontFamily:"monospace",fontWeight:700}}>{a.label}</span></div>
-            <div style={{flex:1,height:20,background:"rgba(10,10,24,0.8)",borderRadius:4,position:"relative",border:"1px solid rgba(255,255,255,0.03)"}}>
+            <div style={{flex:1,height:20,background:"var(--bg-card)",borderRadius:4,position:"relative",border:"1px solid rgba(255,255,255,0.03)"}}>
               {[25,50,75].map(pct=>(<div key={pct} style={{position:"absolute",left:`${pct}%`,top:0,bottom:0,width:1,background:"rgba(255,255,255,0.03)",pointerEvents:"none"}}/>))}
               <div style={{position:"absolute",left:`${left}%`,width:`${width}%`,height:"100%",background:`linear-gradient(90deg,${a.color}66,${a.color}cc)`,borderRadius:3,boxShadow:`0 0 ${isSlowest?16:7}px ${a.color}${isSlowest?99:44}`,border:`1px solid ${a.color}44`,display:"flex",alignItems:"center",justifyContent:"center",minWidth:8,overflow:"hidden"}}>
                 {width>8&&<span style={{color:"#fff",fontSize:7,fontFamily:"monospace",fontWeight:700,paddingLeft:4,whiteSpace:"nowrap"}}>{dur}s</span>}
               </div>
               {isSlowest&&<div style={{position:"absolute",left:`${Math.min(left+width+0.5,72)}%`,top:"50%",transform:"translateY(-50%)",background:"rgba(251,191,36,0.1)",border:"1px solid rgba(251,191,36,0.3)",borderRadius:3,padding:"1px 5px",fontSize:7,fontFamily:"monospace",color:"#fbbf24",whiteSpace:"nowrap",letterSpacing:.5}}>BOTTLENECK</div>}
             </div>
-            <div style={{width:56,flexShrink:0}}><div style={{color:"#475569",fontSize:9,fontFamily:"monospace"}}>{dur}s</div>{tokens&&<div style={{color:"#1e2a3a",fontSize:8,fontFamily:"monospace"}}>{tokens}tok</div>}</div>
+            <div style={{width:56,flexShrink:0}}><div style={{color:"var(--text-dim)",fontSize:9,fontFamily:"monospace"}}>{dur}s</div>{tokens&&<div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>{tokens}tok</div>}</div>
           </div>
         );
       })}
-      <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid rgba(255,255,255,0.04)",display:"flex",justifyContent:"space-between"}}>
-        <span style={{fontSize:8,color:"#1e2a3a",fontFamily:"monospace",letterSpacing:1}}>SEQUENTIAL · {timings.length} AGENTS</span>
-        <span style={{fontSize:8,color:"#1e2a3a",fontFamily:"monospace"}}>async parallelism → ~55% faster</span>
+      <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid var(--border-subtle)",display:"flex",justifyContent:"space-between"}}>
+        <span style={{fontSize:8,color:"var(--text-muted)",fontFamily:"monospace",letterSpacing:1}}>SEQUENTIAL · {timings.length} AGENTS</span>
+        <span style={{fontSize:8,color:"var(--text-muted)",fontFamily:"monospace"}}>async parallelism → ~55% faster</span>
       </div>
     </div>
   );
@@ -615,11 +629,11 @@ function GoalHistory({history,onSelect}){
   const [open,setOpen]=useState(false);if(!history.length)return null;
   return (
     <div style={{position:"relative",marginBottom:8}}>
-      <button onClick={()=>setOpen(!open)} style={{background:"rgba(8,8,20,.85)",border:"1px solid rgba(255,255,255,0.05)",borderRadius:8,padding:"6px 14px",color:"#475569",fontSize:11,fontFamily:"monospace",cursor:"pointer",display:"flex",alignItems:"center",gap:8,transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#7C3AED55";e.currentTarget.style.color="#94a3b8";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255,255,255,0.05)";e.currentTarget.style.color="#475569";}}>
+      <button onClick={()=>setOpen(!open)} style={{background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:8,padding:"6px 14px",color:"var(--text-dim)",fontSize:11,fontFamily:"monospace",cursor:"pointer",display:"flex",alignItems:"center",gap:8,transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#7C3AED55";e.currentTarget.style.color="#94a3b8";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255,255,255,0.05)";e.currentTarget.style.color="#475569";}}>
         🕐 Recent goals <span style={{fontSize:9}}>{open?"▲":"▼"}</span>
       </button>
-      {open&&<div style={{position:"absolute",top:"100%",left:0,right:0,background:"rgba(8,8,22,.98)",border:"1px solid rgba(255,255,255,0.05)",borderRadius:10,padding:8,zIndex:100,backdropFilter:"blur(24px)",animation:"fadeSlideIn .2s ease",minWidth:420}}>
-        {history.map((h,i)=><button key={i} onClick={()=>{onSelect(h);setOpen(false);}} style={{display:"block",width:"100%",textAlign:"left",background:"transparent",border:"none",padding:"8px 12px",color:"#475569",fontSize:11,fontFamily:"monospace",cursor:"pointer",borderRadius:6,transition:"all .15s"}} onMouseEnter={e=>{e.currentTarget.style.background="rgba(124,58,237,.08)";e.currentTarget.style.color="#94a3b8";}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="#475569";}}>{h.substring(0,62)}…</button>)}
+      {open&&<div style={{position:"absolute",top:"100%",left:0,right:0,background:"var(--bg-sidebar)",border:"1px solid var(--border)",borderRadius:10,padding:8,zIndex:100,backdropFilter:"blur(24px)",animation:"fadeSlideIn .2s ease",minWidth:420}}>
+        {history.map((h,i)=><button key={i} onClick={()=>{onSelect(h);setOpen(false);}} style={{display:"block",width:"100%",textAlign:"left",background:"transparent",border:"none",padding:"8px 12px",color:"var(--text-dim)",fontSize:11,fontFamily:"monospace",cursor:"pointer",borderRadius:6,transition:"all .15s"}} onMouseEnter={e=>{e.currentTarget.style.background="rgba(124,58,237,.08)";e.currentTarget.style.color="#94a3b8";}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="#475569";}}>{h.substring(0,62)}…</button>)}
       </div>}
     </div>
   );
@@ -633,30 +647,30 @@ function ApprovalGate({verificationOutput,score,onApprove,onReject,onSteer}){
   const closeWith=(fn)=>{setClosing(true);setVis(false);setTimeout(()=>fn(),320);};
   return (
     <div style={{position:"fixed",inset:0,zIndex:1000,background:closing?"rgba(0,0,8,0)":"rgba(0,0,8,.88)",backdropFilter:"blur(10px)",display:"flex",alignItems:"center",justifyContent:"center",animation:"fadeIn .2s ease",transition:closing?"background .28s ease":"none",pointerEvents:closing?"none":"auto"}}>
-      <div style={{background:"linear-gradient(135deg,#080818,#0c0820)",border:"1px solid #F59E0B99",borderRadius:20,padding:34,maxWidth:580,width:"92%",boxShadow:"0 0 70px rgba(245,158,11,.22)",transform:vis&&!closing?"scale(1) translateY(0)":closing?"scale(.96) translateY(8px)":"scale(.94) translateY(18px)",transition:closing?"all .28s cubic-bezier(.4,0,.2,1)":"all .35s cubic-bezier(.4,0,.2,1)",opacity:closing?0:1}}>
+      <div style={{background:"var(--bg-panel)",border:"1px solid #F59E0B99",borderRadius:20,padding:34,maxWidth:580,width:"92%",boxShadow:"0 0 70px rgba(245,158,11,.22)",transform:vis&&!closing?"scale(1) translateY(0)":closing?"scale(.96) translateY(8px)":"scale(.94) translateY(18px)",transition:closing?"all .28s cubic-bezier(.4,0,.2,1)":"all .35s cubic-bezier(.4,0,.2,1)",opacity:closing?0:1}}>
         <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:18}}>
           <div style={{width:48,height:48,borderRadius:14,background:"rgba(245,158,11,.12)",border:"1px solid rgba(245,158,11,.35)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,boxShadow:"0 0 22px rgba(245,158,11,.28)",animation:"breathe 1.5s infinite"}}>⚠</div>
-          <div style={{flex:1}}><div style={{color:"#fbbf24",fontWeight:700,fontSize:15}}>Conditional Approval Gate</div><div style={{color:"#713f12",fontSize:10,fontFamily:"monospace",letterSpacing:1,marginTop:2}}>HIGH-RISK OPERATION · HUMAN REVIEW REQUIRED</div></div>
+          <div style={{flex:1}}><div style={{color:"#fbbf24",fontWeight:700,fontSize:15}}>Conditional Approval Gate</div><div style={{color:"#d97706",fontSize:10,fontFamily:"monospace",letterSpacing:1,marginTop:2}}>HIGH-RISK OPERATION · HUMAN REVIEW REQUIRED</div></div>
           <ConfidenceGauge score={score}/>
         </div>
         <div style={{background:"rgba(245,158,11,.05)",border:"1px solid rgba(245,158,11,.18)",borderRadius:12,padding:13,marginBottom:14,maxHeight:130,overflowY:"auto"}}>
-          <div style={{color:"#713f12",fontSize:9,fontFamily:"monospace",letterSpacing:1,marginBottom:7}}>VERIFICATION AGENT OUTPUT:</div>
-          <div style={{color:"#e2e8f0",fontSize:11,fontFamily:"'DM Mono',monospace",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{verificationOutput}</div>
+          <div style={{color:"#d97706",fontSize:9,fontFamily:"monospace",letterSpacing:1,marginBottom:7}}>VERIFICATION AGENT OUTPUT:</div>
+          <div style={{color:"var(--text-body)",fontSize:11,fontFamily:"'DM Mono',monospace",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{verificationOutput}</div>
         </div>
         {show&&(
           <div style={{marginBottom:14,animation:"fadeSlideIn .3s ease"}}>
-            <div style={{background:"#020208",border:"1px solid rgba(124,58,237,0.4)",borderRadius:10,overflow:"hidden"}}>
+            <div style={{background:"var(--bg-card)",border:"1px solid rgba(124,58,237,0.4)",borderRadius:10,overflow:"hidden"}}>
               <div style={{background:"rgba(124,58,237,0.08)",borderBottom:"1px solid rgba(124,58,237,0.2)",padding:"6px 12px",display:"flex",alignItems:"center",gap:6}}>
                 <div style={{width:8,height:8,borderRadius:"50%",background:"#f472b6",opacity:.7}}/><div style={{width:8,height:8,borderRadius:"50%",background:"#fbbf24",opacity:.7}}/><div style={{width:8,height:8,borderRadius:"50%",background:"#34d399",opacity:.7}}/>
-                <span style={{marginLeft:8,color:"#334155",fontSize:9,fontFamily:"monospace"}}>chainmind — steering terminal</span>
+                <span style={{marginLeft:8,color:"var(--text-muted)",fontSize:9,fontFamily:"monospace"}}>chainmind — steering terminal</span>
               </div>
               <div style={{padding:"12px 14px",fontFamily:"'DM Mono',monospace",fontSize:12}}>
-                <div style={{color:"#334155",marginBottom:4,fontSize:10}}><span style={{color:"#34d399"}}>chainmind</span><span style={{color:"#475569"}}>@</span><span style={{color:"#38bdf8"}}>gate</span><span style={{color:"#475569"}}>:~$ </span><span style={{color:"#64748b"}}>steer --mode=constrained</span></div>
+                <div style={{color:"var(--text-muted)",marginBottom:4,fontSize:10}}><span style={{color:"#34d399"}}>chainmind</span><span style={{color:"var(--text-dim)"}}>@</span><span style={{color:"#38bdf8"}}>gate</span><span style={{color:"var(--text-dim)"}}>:~$ </span><span style={{color:"var(--text-muted)"}}>steer --mode=constrained</span></div>
                 <div style={{display:"flex",alignItems:"flex-start",gap:6}}>
                   <span style={{color:"#a78bfa",flexShrink:0,lineHeight:"20px"}}>❯</span>
-                  <textarea value={steer} onChange={e=>setSteer(e.target.value)} placeholder="e.g. ignore claim #2, focus only on peer-reviewed sources..." rows={3} autoFocus style={{flex:1,background:"transparent",border:"none",color:"#e2e8f0",fontFamily:"'DM Mono',monospace",fontSize:12,resize:"none",outline:"none",lineHeight:1.6,caretColor:"#a78bfa"}}/>
+                  <textarea value={steer} onChange={e=>setSteer(e.target.value)} placeholder="e.g. ignore claim #2, focus only on peer-reviewed sources..." rows={3} autoFocus style={{flex:1,background:"transparent",border:"none",color:"var(--text-body)",fontFamily:"'DM Mono',monospace",fontSize:12,resize:"none",outline:"none",lineHeight:1.6,caretColor:"#a78bfa"}}/>
                 </div>
-                {!steer&&<div style={{color:"#334155",fontSize:10,marginTop:4,display:"flex",alignItems:"center",gap:4}}><span style={{opacity:blink?1:0,color:"#a78bfa"}}>▌</span><span style={{color:"#2a2a40"}}>type instruction and press Submit</span></div>}
+                {!steer&&<div style={{color:"var(--text-muted)",fontSize:10,marginTop:4,display:"flex",alignItems:"center",gap:4}}><span style={{opacity:blink?1:0,color:"#a78bfa"}}>▌</span><span style={{color:"#2a2a40"}}>type instruction and press Submit</span></div>}
               </div>
             </div>
           </div>
@@ -681,7 +695,7 @@ function FinalReport({reportText,elapsed,tokenCounts,timings,agentTokens}){
     <div style={{background:"linear-gradient(135deg,rgba(236,72,153,.05),rgba(99,102,241,.05))",border:"1px solid rgba(236,72,153,.28)",borderRadius:16,padding:22,boxShadow:"0 0 50px rgba(236,72,153,.1)",animation:"fadeSlideIn .5s ease"}}>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,flexWrap:"wrap"}}>
         <div style={{width:38,height:38,borderRadius:11,background:"rgba(236,72,153,.12)",border:"1px solid rgba(236,72,153,.38)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>📋</div>
-        <div><div style={{color:"#f472b6",fontWeight:700,fontSize:14}}>Synthesized Report</div><div style={{color:"#3a4555",fontSize:10,fontFamily:"monospace"}}>ChainMind · {elapsed}s · 6 agents</div></div>
+        <div><div style={{color:"var(--text-primary)",fontWeight:700,fontSize:14}}>Synthesized Report</div><div style={{color:"var(--text-muted)",fontSize:10,fontFamily:"monospace"}}>ChainMind · {elapsed}s · 6 agents</div></div>
         <div style={{marginLeft:"auto",display:"flex",gap:7}}>
           <button onClick={copy} style={{background:"rgba(236,72,153,.08)",border:"1px solid rgba(236,72,153,.25)",borderRadius:7,padding:"5px 12px",color:"#f472b6",fontSize:10,fontFamily:"monospace",cursor:"pointer"}}>{copied?"✓ Copied":"⎘ Copy"}</button>
           <button onClick={download} style={{background:"rgba(99,102,241,.08)",border:"1px solid rgba(99,102,241,.25)",borderRadius:7,padding:"5px 12px",color:"#818cf8",fontSize:10,fontFamily:"monospace",cursor:"pointer"}}>↓ Export .md</button>
@@ -700,10 +714,10 @@ function FinalReport({reportText,elapsed,tokenCounts,timings,agentTokens}){
                   <div style={{width:3,height:3,borderRadius:"50%",background:"#f472b6",boxShadow:"0 0 6px #f472b6",animation:"breathe 1.5s infinite"}}/>
                   <span style={{color:"#f472b6",fontSize:9,fontFamily:"monospace",letterSpacing:2,fontWeight:700}}>KEY FINDING</span>
                 </div>
-                <div style={{color:"#f1f5f9",fontSize:13,fontWeight:600,lineHeight:1.6,fontFamily:"'DM Sans',sans-serif"}}>{keyLine}</div>
+                <div style={{color:"var(--text-primary)",fontSize:13,fontWeight:600,lineHeight:1.6,fontFamily:"'DM Sans',sans-serif"}}>{keyLine}</div>
               </div>
             )}
-            <div style={{background:"rgba(3,3,12,.8)",borderRadius:10,padding:18,fontFamily:"'DM Mono',monospace",fontSize:12,lineHeight:1.9,color:"#94a3b8",maxHeight:400,overflowY:"auto"}}><StreamText text={reportText} speed={6}/></div>
+            <div style={{background:"var(--bg-panel)",borderRadius:10,padding:18,fontFamily:"'DM Mono',monospace",fontSize:12,lineHeight:1.9,color:"var(--text-secondary)",maxHeight:400,overflowY:"auto"}}><StreamText text={reportText} speed={6}/></div>
           </>
         );
       })()}
@@ -723,26 +737,26 @@ function ProviderSelector(){
   const cur=PROVIDERS.find(p=>p.key===selected);
   return(
     <div style={{position:"relative"}}>
-      <button onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:8,background:"rgba(8,8,26,0.9)",border:`1px solid ${cur.color}44`,borderRadius:8,padding:"6px 12px",cursor:"pointer",transition:"all .2s",boxShadow:`0 0 12px ${cur.color}18`}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:8,background:"var(--bg-card)",border:`1px solid ${cur.color}44`,borderRadius:8,padding:"6px 12px",cursor:"pointer",transition:"all .2s",boxShadow:`0 0 12px ${cur.color}18`}}>
         <div style={{width:7,height:7,borderRadius:"50%",background:cur.color,boxShadow:`0 0 6px ${cur.color}`,animation:"breathe 1.4s infinite"}}/>
         <div>
           <div style={{color:cur.color,fontSize:10,fontWeight:700,fontFamily:"monospace",lineHeight:1}}>{cur.label}</div>
-          <div style={{color:"#334155",fontSize:8,fontFamily:"monospace",lineHeight:1.4}}>{cur.desc}</div>
+          <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",lineHeight:1.4}}>{cur.desc}</div>
         </div>
         <div style={{background:`${cur.color}18`,border:`1px solid ${cur.color}44`,borderRadius:4,padding:"1px 6px",fontSize:7,color:cur.color,fontFamily:"monospace",fontWeight:700,letterSpacing:1}}>CONNECTED</div>
-        <span style={{color:"#334155",fontSize:9}}>{open?"▲":"▼"}</span>
+        <span style={{color:"var(--text-muted)",fontSize:9}}>{open?"▲":"▼"}</span>
       </button>
       {open&&(
-        <div style={{position:"absolute",top:"calc(100% + 6px)",right:0,background:"rgba(8,8,22,.98)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:6,zIndex:200,minWidth:220,backdropFilter:"blur(24px)",boxShadow:"0 8px 32px rgba(0,0,0,0.5)",animation:"fadeSlideIn .15s ease"}}>
-          <div style={{color:"#334155",fontSize:8,fontFamily:"monospace",letterSpacing:2,padding:"4px 10px 8px"}}>SELECT PROVIDER</div>
+        <div style={{position:"absolute",top:"calc(100% + 6px)",right:0,background:"var(--bg-sidebar)",border:"1px solid var(--border)",borderRadius:10,padding:6,zIndex:200,minWidth:220,backdropFilter:"blur(24px)",boxShadow:"0 8px 32px rgba(0,0,0,0.5)",animation:"fadeSlideIn .15s ease"}}>
+          <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:2,padding:"4px 10px 8px"}}>SELECT PROVIDER</div>
           {PROVIDERS.map(p=>(
             <button key={p.key} onClick={()=>{setSelected(p.key);setOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",background:selected===p.key?`${p.color}12`:"transparent",border:`1px solid ${selected===p.key?p.color+"44":"transparent"}`,borderRadius:7,padding:"7px 10px",cursor:"pointer",transition:"all .15s",marginBottom:2}} onMouseEnter={e=>{e.currentTarget.style.background=`${p.color}10`;e.currentTarget.style.borderColor=`${p.color}33`;}} onMouseLeave={e=>{e.currentTarget.style.background=selected===p.key?`${p.color}12`:"transparent";e.currentTarget.style.borderColor=selected===p.key?`${p.color}44`:"transparent";}}>
               <div style={{width:7,height:7,borderRadius:"50%",background:p.color,flexShrink:0,boxShadow:selected===p.key?`0 0 6px ${p.color}`:"none"}}/>
-              <div style={{flex:1}}><div style={{color:p.key===selected?p.color:"#94a3b8",fontSize:10,fontFamily:"monospace",fontWeight:700,lineHeight:1}}>{p.label}</div><div style={{color:"#334155",fontSize:8,fontFamily:"monospace",lineHeight:1.4}}>{p.desc}</div></div>
+              <div style={{flex:1}}><div style={{color:p.key===selected?p.color:"var(--text-secondary)",fontSize:10,fontFamily:"monospace",fontWeight:700,lineHeight:1}}>{p.label}</div><div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",lineHeight:1.4}}>{p.desc}</div></div>
               {selected===p.key&&<span style={{color:p.color,fontSize:10}}>✓</span>}
             </button>
           ))}
-          <div style={{marginTop:6,padding:"6px 10px",borderTop:"1px solid rgba(255,255,255,0.04)",color:"#1e2a3a",fontSize:7,fontFamily:"monospace",lineHeight:1.5}}>Routing via OpenRouter · provider-agnostic architecture</div>
+          <div style={{marginTop:6,padding:"6px 10px",borderTop:"1px solid var(--border-subtle)",color:"var(--text-muted)",fontSize:7,fontFamily:"monospace",lineHeight:1.5}}>Routing via OpenRouter · provider-agnostic architecture</div>
         </div>
       )}
     </div>
@@ -757,9 +771,9 @@ function ProjectSelector({onSelect,selectedId}){
   const priorityColor=(p)=>p==="High"?"#f87171":p==="Medium"?"#fbbf24":"#34d399";
   return(
     <div style={{width:"100%",maxWidth:700}}>
-      <div style={{display:"flex",gap:4,marginBottom:12,background:"rgba(8,8,26,0.9)",border:"1px solid rgba(255,255,255,0.05)",borderRadius:10,padding:4}}>
+      <div style={{display:"flex",gap:4,marginBottom:12,background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,padding:4}}>
         {[{id:"project",label:"📋 Select Project"},{id:"custom",label:"✏️ Custom Goal"}].map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:"8px 0",background:tab===t.id?"rgba(124,58,237,0.15)":"transparent",border:tab===t.id?"1px solid rgba(124,58,237,0.4)":"1px solid transparent",borderRadius:7,color:tab===t.id?"#a78bfa":"#334155",fontSize:11,fontFamily:"monospace",fontWeight:600,cursor:"pointer",transition:"all .2s"}}>{t.label}</button>
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:"8px 0",background:tab===t.id?"rgba(124,58,237,0.15)":"transparent",border:tab===t.id?"1px solid rgba(124,58,237,0.4)":"1px solid transparent",borderRadius:7,color:tab===t.id?"#a78bfa":"#64748b",fontSize:11,fontFamily:"monospace",fontWeight:600,cursor:"pointer",transition:"all .2s"}}>{t.label}</button>
         ))}
       </div>
       {tab==="project"&&(
@@ -767,17 +781,17 @@ function ProjectSelector({onSelect,selectedId}){
           {PROJECTS.map(p=>{
             const isSelected=selectedId===p.id;
             return(
-              <button key={p.id} onClick={()=>onSelect(p)} style={{textAlign:"left",background:isSelected?"rgba(124,58,237,0.12)":"rgba(8,8,26,0.9)",border:`1px solid ${isSelected?"rgba(124,58,237,0.5)":"rgba(255,255,255,0.05)"}`,borderRadius:10,padding:"12px 14px",cursor:"pointer",transition:"all .2s",boxShadow:isSelected?"0 0 20px rgba(124,58,237,0.15)":"none"}} onMouseEnter={e=>{if(!isSelected){e.currentTarget.style.borderColor="rgba(124,58,237,0.3)";e.currentTarget.style.background="rgba(124,58,237,0.06)";}}} onMouseLeave={e=>{if(!isSelected){e.currentTarget.style.borderColor="rgba(255,255,255,0.05)";e.currentTarget.style.background="rgba(8,8,26,0.9)";}}} >
+              <button key={p.id} onClick={()=>onSelect(p)} style={{textAlign:"left",background:isSelected?"rgba(124,58,237,0.12)":"var(--bg-card)",border:`1px solid ${isSelected?"rgba(124,58,237,0.5)":"var(--border)"}`,borderRadius:10,padding:"12px 14px",cursor:"pointer",transition:"all .2s",boxShadow:isSelected?"0 0 20px rgba(124,58,237,0.15)":"none"}} onMouseEnter={e=>{if(!isSelected){e.currentTarget.style.borderColor="rgba(124,58,237,0.3)";e.currentTarget.style.background="rgba(124,58,237,0.06)";}}} onMouseLeave={e=>{if(!isSelected){e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--bg-card)";}}} >
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:5}}>
                   <span style={{color:isSelected?"#a78bfa":"#475569",fontSize:9,fontFamily:"monospace",fontWeight:700}}>{p.id}</span>
                   <span style={{background:`${priorityColor(p.priority)}18`,border:`1px solid ${priorityColor(p.priority)}44`,borderRadius:4,padding:"1px 6px",fontSize:7,color:priorityColor(p.priority),fontFamily:"monospace",fontWeight:700}}>{p.priority}</span>
                 </div>
                 <div style={{color:isSelected?"#f1f5f9":"#94a3b8",fontSize:11,fontWeight:700,marginBottom:4,fontFamily:"monospace"}}>{p.name}</div>
-                <div style={{color:"#334155",fontSize:9,fontFamily:"monospace",lineHeight:1.5,marginBottom:6}}>{p.desc}</div>
+                <div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",lineHeight:1.5,marginBottom:6}}>{p.desc}</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:4}}>
                   {p.skills.map(s=>(<span key={s} style={{background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.2)",borderRadius:3,padding:"1px 5px",fontSize:7,color:"#818cf8",fontFamily:"monospace"}}>{s}</span>))}
                 </div>
-                <div style={{color:"#1e2a3a",fontSize:8,fontFamily:"monospace"}}>⏱ {p.deadline} days deadline</div>
+                <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>⏱ {p.deadline} days deadline</div>
               </button>
             );
           })}
@@ -785,49 +799,131 @@ function ProjectSelector({onSelect,selectedId}){
       )}
       {tab==="custom"&&(
         <div style={{position:"relative",borderRadius:14,overflow:"hidden",border:`1px solid ${focused?"#7C3AED88":"rgba(255,255,255,0.05)"}`,boxShadow:focused?"0 0 32px rgba(124,58,237,.18)":"none",transition:"all .3s",backdropFilter:"blur(20px)"}}>
-          <textarea value={customGoal} onChange={e=>{setCustomGoal(e.target.value);onSelect({id:"custom",name:"Custom Goal",desc:e.target.value,skills:[],deadline:0,priority:"Medium"});}} onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)} placeholder="Describe your project goal… e.g. 'Build a recommendation engine for our e-commerce platform'" rows={4} style={{width:"100%",background:"rgba(6,6,18,.97)",border:"none",padding:"16px 18px",color:"#e2e8f0",fontFamily:"'DM Mono',monospace",fontSize:13,lineHeight:1.7,resize:"none",outline:"none",boxSizing:"border-box"}}/>
+          <textarea value={customGoal} onChange={e=>{setCustomGoal(e.target.value);onSelect({id:"custom",name:"Custom Goal",desc:e.target.value,skills:[],deadline:0,priority:"Medium"});}} onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)} placeholder="Describe your project goal… e.g. 'Build a recommendation engine for our e-commerce platform'" rows={4} style={{width:"100%",background:"var(--bg-input)",border:"none",padding:"16px 18px",color:"var(--text-body)",fontFamily:"'DM Mono',monospace",fontSize:13,lineHeight:1.7,resize:"none",outline:"none",boxSizing:"border-box"}}/>
         </div>
       )}
     </div>
   );
 }
 
-// ── EmployeeSidebar (v9 new) ──────────────────────────────────────────────────
-function EmployeeSidebar({open,onClose,assignments}){
+// ── WorkloadChart (v4 new) ────────────────────────────────────────────────────
+function WorkloadChart({employees}){
+  const max=100;
+  return(
+    <div style={{padding:"10px 18px",borderBottom:"1px solid var(--border-subtle)",flexShrink:0}}>
+      <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:2,marginBottom:8}}>TEAM WORKLOAD</div>
+      {employees.map(emp=>{
+        const def=DEFAULT_EMPLOYEES.find(d=>d.id===emp.id);
+        const delta=emp.workload-(def?.workload||0);
+        const wColor=emp.workload>=80?"#f87171":emp.workload>=55?"#fbbf24":"#34d399";
+        return(
+          <div key={emp.id} style={{marginBottom:6}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+              <span style={{color:"var(--text-dim)",fontSize:8,fontFamily:"monospace"}}>{emp.name.split(" ")[0]}</span>
+              <div style={{display:"flex",gap:5,alignItems:"center"}}>
+                {delta>0&&<span style={{color:"#f87171",fontSize:7,fontFamily:"monospace",background:"rgba(248,113,113,0.1)",border:"1px solid rgba(248,113,113,0.2)",borderRadius:3,padding:"0px 4px"}}>+{delta}%</span>}
+                {emp.workload>=80&&<span style={{color:"#f87171",fontSize:7,fontFamily:"monospace",animation:"blink 1s infinite"}}>⚠ OVERLOADED</span>}
+                <span style={{color:wColor,fontSize:8,fontFamily:"monospace",fontWeight:700}}>{emp.workload}%</span>
+              </div>
+            </div>
+            <div style={{height:4,background:"var(--bg-track)",borderRadius:2,overflow:"hidden",position:"relative"}}>
+              {/* baseline ghost bar */}
+              {def&&<div style={{position:"absolute",left:0,width:`${def.workload}%`,height:"100%",background:"rgba(255,255,255,0.06)",borderRadius:2}}/>}
+              <div style={{height:"100%",width:`${emp.workload}%`,background:`linear-gradient(90deg,${wColor}88,${wColor})`,borderRadius:2,transition:"width .6s ease",boxShadow:emp.workload>=80?`0 0 6px ${wColor}`:"none"}}/>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── AssignmentHistory (v4 new) ────────────────────────────────────────────────
+function AssignmentHistoryPanel({history}){
+  if(!history.length) return(
+    <div style={{padding:"10px 18px",borderBottom:"1px solid var(--border-subtle)",flexShrink:0}}>
+      <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:2,marginBottom:6}}>ASSIGNMENT HISTORY</div>
+      <div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",fontStyle:"italic"}}>No assignments yet…</div>
+    </div>
+  );
+  return(
+    <div style={{padding:"10px 18px",borderBottom:"1px solid var(--border-subtle)",flexShrink:0,maxHeight:140,overflowY:"auto"}}>
+      <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:2,marginBottom:6}}>ASSIGNMENT HISTORY</div>
+      {[...history].reverse().map((entry,i)=>(
+        <div key={i} style={{marginBottom:6,padding:"5px 8px",borderRadius:6,background:"var(--bg-hover)",border:"1px solid rgba(255,255,255,0.03)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+            <span style={{color:"var(--text-dim)",fontSize:9,fontFamily:"monospace",fontWeight:700}}>{entry.project}</span>
+            <span style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>{new Date(entry.ts).toLocaleDateString()}</span>
+          </div>
+          {entry.deltas.map((d,j)=>(
+            <div key={j} style={{display:"flex",justifyContent:"space-between",paddingLeft:6}}>
+              <span style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>{d.name}</span>
+              <span style={{color:"#f87171",fontSize:8,fontFamily:"monospace"}}>+{d.delta}% → {d.newWorkload}%</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── EmployeeSidebar (v4: workload persistence, chart, history, overload, reset) ──
+function EmployeeSidebar({open,onClose,assignments,employees,onResetWorkloads,assignmentHistory}){
   return(
     <>
-      {open&&<div onClick={onClose} style={{position:"fixed",inset:0,zIndex:299,background:"rgba(0,0,0,0.3)"}}/>}
-      <div style={{position:"fixed",top:0,right:0,bottom:0,width:320,zIndex:300,background:"rgba(6,6,18,0.98)",borderLeft:"1px solid rgba(255,255,255,0.06)",backdropFilter:"blur(24px)",transform:open?"translateX(0)":"translateX(100%)",transition:"transform .3s cubic-bezier(.4,0,.2,1)",display:"flex",flexDirection:"column",boxShadow:open?"-8px 0 40px rgba(0,0,0,0.5)":"none"}}>
-        <div style={{padding:"16px 18px",borderBottom:"1px solid rgba(255,255,255,0.05)",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
-          <div><div style={{color:"#f1f5f9",fontSize:13,fontWeight:700,fontFamily:"monospace"}}>👥 Team</div><div style={{color:"#334155",fontSize:9,fontFamily:"monospace",letterSpacing:1,marginTop:2}}>{EMPLOYEES.length} MEMBERS</div></div>
-          <button onClick={onClose} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:7,width:28,height:28,color:"#475569",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+      {open&&<div onClick={onClose} style={{position:"fixed",inset:0,zIndex:299,background:"var(--bg-hover)"}}/>}
+      <div style={{position:"fixed",top:0,right:0,bottom:0,width:320,zIndex:300,background:"var(--bg-sidebar)",borderLeft:"1px solid var(--border)",backdropFilter:"blur(24px)",transform:open?"translateX(0)":"translateX(100%)",transition:"transform .3s cubic-bezier(.4,0,.2,1)",display:"flex",flexDirection:"column",boxShadow:open?"-8px 0 40px rgba(0,0,0,0.5)":"none"}}>
+        <div style={{padding:"16px 18px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+          <div><div style={{color:"var(--text-primary)",fontSize:13,fontWeight:700,fontFamily:"monospace"}}>👥 Team</div><div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",letterSpacing:1,marginTop:2}}>{employees.length} MEMBERS</div></div>
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+            <button onClick={onResetWorkloads} style={{background:"rgba(248,113,113,0.08)",border:"1px solid rgba(248,113,113,0.2)",borderRadius:7,padding:"4px 8px",color:"#f87171",cursor:"pointer",fontSize:8,fontFamily:"monospace",whiteSpace:"nowrap"}} title="Reset all workloads to defaults">↺ Reset</button>
+            <button onClick={onClose} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:7,width:28,height:28,color:"var(--text-dim)",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+          </div>
         </div>
-        <div style={{padding:"10px 18px",borderBottom:"1px solid rgba(255,255,255,0.04)",flexShrink:0}}>
-          <div style={{color:"#1e2a3a",fontSize:8,fontFamily:"monospace",letterSpacing:2,marginBottom:6}}>PAST PROJECTS</div>
+        <WorkloadChart employees={employees}/>
+        <AssignmentHistoryPanel history={assignmentHistory}/>
+        <div style={{padding:"10px 18px",borderBottom:"1px solid var(--border-subtle)",flexShrink:0}}>
+          <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:2,marginBottom:6}}>PAST PROJECTS</div>
           {HISTORY_DATA.map(h=>(
-            <div key={h.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,padding:"5px 8px",borderRadius:6,background:"rgba(0,0,0,0.3)"}}>
-              <div style={{flex:1}}><div style={{color:"#475569",fontSize:9,fontFamily:"monospace",fontWeight:700}}>{h.name}</div><div style={{color:"#1e2a3a",fontSize:8,fontFamily:"monospace"}}>{h.days} days · {h.teamSize} members</div></div>
+            <div key={h.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,padding:"5px 8px",borderRadius:6,background:"var(--bg-hover)"}}>
+              <div style={{flex:1}}><div style={{color:"var(--text-dim)",fontSize:9,fontFamily:"monospace",fontWeight:700}}>{h.name}</div><div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>{h.days} days · {h.teamSize} members</div></div>
               <div style={{color:h.score>=0.92?"#34d399":"#fbbf24",fontSize:10,fontFamily:"monospace",fontWeight:700}}>{Math.round(h.score*100)}%</div>
             </div>
           ))}
         </div>
         <div style={{flex:1,overflowY:"auto",padding:"10px 18px"}}>
-          <div style={{color:"#1e2a3a",fontSize:8,fontFamily:"monospace",letterSpacing:2,marginBottom:8}}>EMPLOYEES</div>
-          {EMPLOYEES.map(emp=>{
+          <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:2,marginBottom:8}}>EMPLOYEES</div>
+          {employees.map(emp=>{
             const assigned=assignments?.[emp.id];
-            const workloadColor=emp.workload>=55?"#f87171":emp.workload>=45?"#fbbf24":"#34d399";
+            const isOverloaded=emp.workload>=80;
+            const workloadColor=isOverloaded?"#f87171":emp.workload>=55?"#fbbf24":"#34d399";
+            const def=DEFAULT_EMPLOYEES.find(d=>d.id===emp.id);
+            const delta=emp.workload-(def?.workload||0);
             return(
-              <div key={emp.id} style={{marginBottom:10,padding:"11px 12px",borderRadius:10,background:assigned?"rgba(124,58,237,0.08)":"rgba(8,8,26,0.8)",border:`1px solid ${assigned?emp.color+"55":"rgba(255,255,255,0.05)"}`,transition:"all .3s",boxShadow:assigned?`0 0 14px ${emp.color}22`:"none",animation:assigned?"fadeSlideIn .4s ease":"none"}}>
+              <div key={emp.id} style={{marginBottom:10,padding:"11px 12px",borderRadius:10,background:isOverloaded?"rgba(248,113,113,0.05)":assigned?"rgba(124,58,237,0.08)":"var(--bg-card)",border:`1px solid ${isOverloaded?"rgba(248,113,113,0.3)":assigned?emp.color+"55":"var(--border)"}`,transition:"all .3s",boxShadow:isOverloaded?"0 0 14px rgba(248,113,113,0.15)":assigned?`0 0 14px ${emp.color}22`:"none",animation:assigned?"fadeSlideIn .4s ease":"none"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
-                  <div style={{width:28,height:28,borderRadius:8,background:`${emp.color}18`,border:`1px solid ${emp.color}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:emp.color,flexShrink:0,fontFamily:"monospace"}}>{emp.name.split(" ").map(n=>n[0]).join("")}</div>
-                  <div style={{flex:1,minWidth:0}}><div style={{color:assigned?emp.color:"#94a3b8",fontSize:10,fontWeight:700,fontFamily:"monospace",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{emp.name}</div><div style={{color:"#334155",fontSize:8,fontFamily:"monospace"}}>{emp.role}</div></div>
-                  <div style={{color:workloadColor,fontSize:9,fontFamily:"monospace",fontWeight:700,flexShrink:0}}>{emp.workload}%</div>
+                  <div style={{width:28,height:28,borderRadius:8,background:`${emp.color}18`,border:`1px solid ${isOverloaded?"rgba(248,113,113,0.4)":emp.color+"44"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:isOverloaded?"#f87171":emp.color,flexShrink:0,fontFamily:"monospace"}}>{emp.name.split(" ").map(n=>n[0]).join("")}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <div style={{color:isOverloaded?"#f87171":assigned?emp.color:"var(--text-secondary)",fontSize:10,fontWeight:700,fontFamily:"monospace",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{emp.name}</div>
+                      {isOverloaded&&<span style={{color:"#f87171",fontSize:7,fontFamily:"monospace",background:"rgba(248,113,113,0.1)",border:"1px solid rgba(248,113,113,0.25)",borderRadius:3,padding:"1px 4px",flexShrink:0,animation:"pulse 1.5s infinite"}}>OVERLOADED</span>}
+                    </div>
+                    <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>{emp.role}</div>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:2,flexShrink:0}}>
+                    <div style={{color:workloadColor,fontSize:9,fontFamily:"monospace",fontWeight:700}}>{emp.workload}%</div>
+                    {delta>0&&<div style={{color:"#f87171",fontSize:7,fontFamily:"monospace",background:"rgba(248,113,113,0.1)",border:"1px solid rgba(248,113,113,0.2)",borderRadius:3,padding:"0px 4px"}}>+{delta}%</div>}
+                  </div>
                 </div>
-                <div style={{height:3,background:"#0a0a18",borderRadius:2,marginBottom:7,overflow:"hidden"}}><div style={{height:"100%",width:`${emp.workload}%`,background:`linear-gradient(90deg,${workloadColor}88,${workloadColor})`,borderRadius:2,transition:"width .6s ease"}}/></div>
+                <div style={{height:3,background:"var(--bg-track)",borderRadius:2,marginBottom:7,overflow:"hidden",position:"relative"}}>
+                  {def&&<div style={{position:"absolute",left:0,width:`${def.workload}%`,height:"100%",background:"rgba(255,255,255,0.08)",borderRadius:2}}/>}
+                  <div style={{height:"100%",width:`${emp.workload}%`,background:`linear-gradient(90deg,${workloadColor}88,${workloadColor})`,borderRadius:2,transition:"width .6s ease",boxShadow:isOverloaded?`0 0 6px ${workloadColor}`:"none"}}/>
+                </div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:assigned?6:0}}>
-                  {emp.skills.map(s=>(<span key={s} style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:3,padding:"1px 5px",fontSize:7,color:"#334155",fontFamily:"monospace"}}>{s}</span>))}
+                  {emp.skills.map(s=>(<span key={s} style={{background:"rgba(255,255,255,0.03)",border:"1px solid var(--border)",borderRadius:3,padding:"1px 5px",fontSize:7,color:"var(--text-muted)",fontFamily:"monospace"}}>{s}</span>))}
                 </div>
                 {assigned&&<div style={{marginTop:4,padding:"4px 8px",borderRadius:5,background:`${emp.color}12`,border:`1px solid ${emp.color}33`,fontSize:8,color:emp.color,fontFamily:"monospace",lineHeight:1.4,animation:"fadeSlideIn .3s ease"}}>▸ {assigned}</div>}
+                {isOverloaded&&!assigned&&<div style={{marginTop:4,padding:"3px 7px",borderRadius:5,background:"rgba(248,113,113,0.06)",border:"1px solid rgba(248,113,113,0.2)",fontSize:8,color:"#f87171",fontFamily:"monospace"}}>⚠ Auto-skipped in next assignment</div>}
               </div>
             );
           })}
@@ -837,30 +933,34 @@ function EmployeeSidebar({open,onClose,assignments}){
   );
 }
 
-// ── Landing (v9: updated with ProjectSelector, ProviderSelector, sidebar toggle) ──
-function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,onToggleSidebar,assignments}){
+// ── Landing (v4) ──
+function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,onToggleSidebar,assignments,employeeCount,darkMode,toggleTheme}){
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 24px",position:"relative",zIndex:1}}>
       <div style={{textAlign:"center",marginBottom:36,animation:"fadeSlideIn .6s ease",width:"100%",maxWidth:700}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:24}}>
           <div style={{display:"inline-flex",alignItems:"center",gap:14}}>
-            <div style={{width:56,height:56,borderRadius:18,background:"linear-gradient(135deg,rgba(124,58,237,.28),rgba(14,165,233,.28))",border:"1px solid rgba(255,255,255,0.06)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,boxShadow:"0 0 48px rgba(124,58,237,.38)",animation:"float 3s ease-in-out infinite",backdropFilter:"blur(20px)"}}>⛓</div>
+            <div style={{width:56,height:56,borderRadius:18,background:"linear-gradient(135deg,rgba(124,58,237,.28),rgba(14,165,233,.28))",border:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,boxShadow:"0 0 48px rgba(124,58,237,.38)",animation:"float 3s ease-in-out infinite",backdropFilter:"blur(20px)"}}>⛓</div>
             <div style={{textAlign:"left"}}>
-              <div style={{color:"#f1f5f9",fontWeight:800,fontSize:28,letterSpacing:"-1px"}}>ChainMind</div>
-              <div style={{color:"#1e2a3a",fontSize:11,fontFamily:"monospace",letterSpacing:2}}>MULTI-AGENT ORCHESTRATION FRAMEWORK</div>
+              <div style={{color:"var(--text-primary)",fontWeight:800,fontSize:28,letterSpacing:"-1px"}}>ChainMind</div>
+              <div style={{color:"var(--text-muted)",fontSize:11,fontFamily:"monospace",letterSpacing:2}}>MULTI-AGENT ORCHESTRATION FRAMEWORK</div>
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <button onClick={onToggleSidebar} style={{display:"flex",alignItems:"center",gap:7,background:"rgba(8,8,26,0.9)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:8,padding:"7px 12px",cursor:"pointer",color:"#475569",fontSize:11,fontFamily:"monospace",transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#7C3AED55";e.currentTarget.style.color="#94a3b8";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255,255,255,0.06)";e.currentTarget.style.color="#475569";}}>
-              👥 Team <span style={{background:"rgba(124,58,237,0.15)",border:"1px solid rgba(124,58,237,0.3)",borderRadius:10,padding:"1px 6px",color:"#a78bfa",fontSize:9,marginLeft:2}}>{EMPLOYEES.length}</span>
+            <button onClick={onToggleSidebar} style={{display:"flex",alignItems:"center",gap:7,background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:8,padding:"7px 12px",cursor:"pointer",color:"var(--text-dim)",fontSize:11,fontFamily:"monospace",transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#7C3AED55";e.currentTarget.style.color="#94a3b8";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255,255,255,0.06)";e.currentTarget.style.color="#475569";}}>
+              👥 Team <span style={{background:"rgba(124,58,237,0.15)",border:"1px solid rgba(124,58,237,0.3)",borderRadius:10,padding:"1px 6px",color:"#a78bfa",fontSize:9,marginLeft:2}}>{employeeCount}</span>
             </button>
             <ProviderSelector/>
+            <button onClick={toggleTheme} title={darkMode?"Switch to Light Mode":"Switch to Dark Mode"} style={{background:darkMode?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.06)",border:`1px solid ${darkMode?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.1)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",display:"flex",alignItems:"center",gap:6,transition:"all .3s"}}>
+              <span style={{fontSize:13}}>{darkMode?"☀️":"🌙"}</span>
+              <span style={{fontSize:9,fontFamily:"monospace",color:darkMode?"#64748b":"#475569",letterSpacing:.5}}>{darkMode?"LIGHT":"DARK"}</span>
+            </button>
           </div>
         </div>
-        <div style={{fontSize:38,fontWeight:800,color:"#f1f5f9",letterSpacing:"-2px",lineHeight:1.08,marginBottom:14}}>
+        <div style={{fontSize:38,fontWeight:800,color:"var(--text-primary)",letterSpacing:"-2px",lineHeight:1.08,marginBottom:14}}>
           The only agent system<br/>that <span style={{background:"linear-gradient(135deg,#fbbf24,#f472b6)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>stops and asks you</span><br/>before it's too late.
         </div>
-        <div style={{color:"#2a3a4a",fontSize:13,fontFamily:"'DM Mono',monospace",maxWidth:500,margin:"0 auto",lineHeight:1.9}}>
+        <div style={{color:"var(--text-muted)",fontSize:13,fontFamily:"'DM Mono',monospace",maxWidth:500,margin:"0 auto",lineHeight:1.9}}>
           Every other pipeline is a black box. ChainMind has a<br/>
           <span style={{color:"#fbbf24"}}>Conditional Approval Gate</span> — a hard stop where a human<br/>
           reviews confidence scores, steers the output, or kills the run.
@@ -875,7 +975,7 @@ function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,
         <div style={{marginTop:14,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
           <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
             {SAMPLE_GOALS.slice(0,2).map((sg,i)=>(
-              <button key={i} onClick={()=>onSelectProject({id:"custom",name:"Custom Goal",desc:sg,skills:[],deadline:0,priority:"Medium"})} style={{background:"rgba(8,8,20,.85)",border:"1px solid rgba(255,255,255,0.04)",borderRadius:8,padding:"5px 12px",color:"#2a3a4a",fontSize:10,fontFamily:"monospace",cursor:"pointer",backdropFilter:"blur(8px)",transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#7C3AED55";e.currentTarget.style.color="#94a3b8";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255,255,255,0.04)";e.currentTarget.style.color="#2a3a4a";}}>
+              <button key={i} onClick={()=>onSelectProject({id:"custom",name:"Custom Goal",desc:sg,skills:[],deadline:0,priority:"Medium"})} style={{background:"var(--bg-card)",border:"1px solid var(--border-subtle)",borderRadius:8,padding:"5px 12px",color:"var(--text-muted)",fontSize:10,fontFamily:"monospace",cursor:"pointer",backdropFilter:"blur(8px)",transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#7C3AED55";e.currentTarget.style.color="#94a3b8";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255,255,255,0.04)";e.currentTarget.style.color="#64748b";}}>
                 {sg.substring(0,42)}…
               </button>
             ))}
@@ -917,27 +1017,37 @@ export default function ChainMind(){
   const [history,setHistory]=useState([]);
   const [hoveredAgent,setHoveredAgent]=useState(null);
 
-  // ── v9 new state ──────────────────────────────────────────────────────────
+  // ── v4 new state ──────────────────────────────────────────────────────────
   const [selectedProject,setSelectedProject]=useState(null);
   const [sidebarOpen,setSidebarOpen]=useState(false);
   const [assignments,setAssignments]=useState({});
+  const [employees,setEmployees]=useState(loadEmployees);
+  const [assignmentHistory,setAssignmentHistory]=useState(loadAssignmentHistory);
+  const [skillGapWarning,setSkillGapWarning]=useState(null);
+  const [darkMode,setDarkMode]=useState(()=>{
+    try{ return localStorage.getItem("cm_theme")!=="light"; }catch(e){ return true; }
+  });
 
   const t0=useRef(null),live=useRef(false),steerRef=useRef(null);
   const gridRef=useRef(null),agentCardRefs=useRef({}),traceRef=useRef(null),memRef=useRef(null);
   const apiConfigured=!!import.meta.env.VITE_OPENROUTER_KEY;
 
-  // ── Build effective goal from selected project (v9) ───────────────────────
+  // ── Build effective goal from selected project (v4) ───────────────────────
   function buildGoal(project){
     if(!project||project.id==="custom") return project?.desc||"";
-    const empSummary=EMPLOYEES.map(e=>`${e.name} (${e.role}, Skills: ${e.skills.join(", ")}, Workload: ${e.workload}%, Experience: ${e.experience}yr)`).join("\n");
+    // Overload protection: mark employees at 80%+ as unavailable to the planner
+    const empSummary=employees.map(e=>{
+      const status=e.workload>=80?"UNAVAILABLE — overloaded, do not assign":"available";
+      return `${e.name} (${e.role}, Skills: ${e.skills.join(", ")}, Workload: ${e.workload}%, Experience: ${e.experience}yr, Status: ${status})`;
+    }).join("\n");
     const histSummary=HISTORY_DATA.map(h=>`${h.name}: ${h.teamSize} members, ${h.days} days, success score ${h.score}`).join("\n");
-    return `PROJECT: ${project.name}\nDESCRIPTION: ${project.desc}\nREQUIRED SKILLS: ${project.skills.join(", ")}\nDEADLINE: ${project.deadline} days\nPRIORITY: ${project.priority}\n\nTEAM MEMBERS:\n${empSummary}\n\nPAST PROJECT HISTORY:\n${histSummary}\n\nAnalyse the project requirements, decompose into sub-tasks, and assign each sub-task to the most appropriate team member based on their skills and current workload.`;
+    return `PROJECT: ${project.name}\nDESCRIPTION: ${project.desc}\nREQUIRED SKILLS: ${project.skills.join(", ")}\nDEADLINE: ${project.deadline} days\nPRIORITY: ${project.priority}\n\nTEAM MEMBERS:\n${empSummary}\n\nPAST PROJECT HISTORY:\n${histSummary}\n\nAnalyse the project requirements, decompose into sub-tasks, and assign each sub-task to the most appropriate team member based on their skills and current workload. Do NOT assign tasks to employees marked UNAVAILABLE.`;
   }
 
-  // ── Parse employee assignments from final report (v9) ────────────────────
+  // ── Parse employee assignments from final report (v4) ────────────────────
   function parseAssignments(reportTxt){
     const result={};
-    EMPLOYEES.forEach(emp=>{
+    employees.forEach(emp=>{
       const firstName=emp.name.split(" ")[0];
       const lines=reportTxt.split("\n").filter(l=>l.includes(firstName)||l.includes(emp.name));
       if(lines.length>0){
@@ -946,6 +1056,14 @@ export default function ChainMind(){
       }
     });
     return result;
+  }
+
+  // ── Skill gap check (v4 new) ─────────────────────────────────────────────
+  function checkSkillGap(project){
+    if(!project||project.id==="custom"||!project.skills?.length) return null;
+    const allSkills=employees.flatMap(e=>e.skills.map(s=>s.toLowerCase()));
+    const missing=project.skills.filter(s=>!allSkills.some(es=>es.includes(s.toLowerCase())||s.toLowerCase().includes(es)));
+    return missing.length>0?missing:null;
   }
 
   const log=useCallback((agent,msg,model=null)=>{setTrace(p=>[...p,{agent,msg,model,ts:Date.now()}]);},[]);
@@ -973,10 +1091,37 @@ export default function ChainMind(){
         else if(idx===5){
           result=await runReport(currentGoal,out.planner||"",out.research||"",out.execution||"",out.verification||"",steerRef.current);
           out.report=result;setReportText(result);
-          // v9: parse assignments and auto-open sidebar
+          // v4: parse assignments, bump workloads, save history
           const parsed=parseAssignments(result);
           setAssignments(parsed);
-          if(Object.keys(parsed).length>0) setTimeout(()=>setSidebarOpen(true),800);
+          if(Object.keys(parsed).length>0){
+            setEmployees(prev=>{
+              const deltas=[];
+              const updated=prev.map(emp=>{
+                if(parsed[emp.id]){
+                  const newWorkload=Math.min(95,emp.workload+10);
+                  deltas.push({id:emp.id,name:emp.name.split(" ")[0],delta:newWorkload-emp.workload,newWorkload});
+                  return{...emp,workload:newWorkload};
+                }
+                return emp;
+              });
+              saveEmployees(updated);
+              // record assignment history entry
+              if(deltas.length>0){
+                const projectName=currentGoal.includes("PROJECT:")
+                  ?currentGoal.split("\n")[0].replace("PROJECT:","").trim()
+                  :currentGoal.substring(0,30);
+                setAssignmentHistory(prev2=>{
+                  const newEntry={project:projectName,ts:Date.now(),deltas};
+                  const updated2=[...prev2,newEntry].slice(-20);
+                  saveAssignmentHistory(updated2);
+                  return updated2;
+                });
+              }
+              return updated;
+            });
+            setTimeout(()=>setSidebarOpen(true),800);
+          }
         }
         clearInterval(ticker);setProgress(100);setOutputs({...out});
         const estTokens=Math.round(result.length/4)+step.expectedTokens;
@@ -1019,6 +1164,13 @@ export default function ChainMind(){
 
   const startRun=useCallback(()=>{
     if(!selectedProject)return;
+    // v4: skill gap check before burning API calls
+    const gaps=checkSkillGap(selectedProject);
+    if(gaps){
+      setSkillGapWarning(`Skill gap detected: no team member covers [${gaps.join(", ")}]. Pipeline will still run but assignments may be suboptimal.`);
+    } else {
+      setSkillGapWarning(null);
+    }
     const effectiveGoal=buildGoal(selectedProject);
     if(!effectiveGoal.trim())return;
     live.current=true;t0.current=Date.now();
@@ -1034,7 +1186,7 @@ export default function ChainMind(){
     log("planner","ChainMind initialised — goal received","frontier");
     log("planner",`Decomposing: "${displayGoal.substring(0,60)}…"`,"frontier");
     runPipeline(effectiveGoal);
-  },[selectedProject,log,runPipeline]);
+  },[selectedProject,employees,log,runPipeline]);
 
   const handleApprove=useCallback(()=>{const g=gate;setGate(null);setPhase("running");setStepStatus(g.idx,"done");log("verification","✓ Approved — continuing","mid");runPipeline(goal,steerRef.current);},[gate,goal,log,setStepStatus,runPipeline]);
   const handleReject=useCallback(()=>{live.current=false;setGate(null);setPhase("done");setStepStatus(gate.idx,"done");setElapsed(Math.round((Date.now()-t0.current)/1000));log("verification","✕ Rejected — terminated","mid");setReportText("Workflow terminated at Verification Gate.\n\nThe Verification Agent flagged low-confidence claims not approved for synthesis.");},[gate,log,setStepStatus]);
@@ -1046,7 +1198,7 @@ export default function ChainMind(){
     setMStats({slm:0,mid:0,frontier:0});setGate(null);setGuard(null);setProgress(0);
     setGoal("");setOutputs({});setReportText("");setError(null);setMcpPulsing([]);
     setTokenCounts({slm:0,mid:0,frontier:0});setAgentTokens({});setTimings([]);
-    setAssignments({});setSidebarOpen(false);
+    setAssignments({});setSidebarOpen(false);setSkillGapWarning(null);
   };
 
   useEffect(()=>{
@@ -1057,12 +1209,14 @@ export default function ChainMind(){
   const totalCost=Object.entries(tokenCounts).reduce((s,[tier,tok])=>s+(tok*(MODEL_TIERS[tier]?.costPer1k||0)/1000),0);
   const activeAgentKey=curIdx>=0?WORKFLOW[curIdx]?.agent:null;
 
+  const toggleTheme=()=>{ const n=!darkMode; setDarkMode(n); try{ localStorage.setItem("cm_theme",n?"dark":"light"); }catch(e){} };
+
   return (
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap');
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-        body{background:#04040e;overflow-x:hidden;}
+        body{overflow-x:hidden;}
         *{scrollbar-width:thin;scrollbar-color:transparent transparent;}
         *:hover{scrollbar-color:#3730a3 transparent;}
         ::-webkit-scrollbar{width:2px;height:2px;}
@@ -1079,13 +1233,71 @@ export default function ChainMind(){
         @keyframes shimmer     {0%{background-position:200% 0}100%{background-position:-200% 0}}
         @keyframes float       {0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
         @keyframes ripple      {0%{opacity:0.8;transform:scale(1)}100%{opacity:0;transform:scale(1.4)}}
+
+        /* ── DARK MODE (default) ── */
+        [data-theme="dark"] {
+          --bg-base:       #04040e;
+          --bg-panel:      rgba(3,3,14,0.92);
+          --bg-card:       rgba(8,8,20,0.85);
+          --bg-header:     rgba(3,3,12,0.82);
+          --bg-input:      rgba(6,6,18,0.97);
+          --bg-sidebar:    rgba(6,6,18,0.98);
+          --bg-hover:      rgba(124,58,237,0.08);
+          --bg-track:      #0a0a18;
+          --border:        rgba(255,255,255,0.05);
+          --border-subtle: rgba(255,255,255,0.04);
+          --text-primary:  #f1f5f9;
+          --text-body:     #e2e8f0;
+          --text-secondary:#94a3b8;
+          --text-muted:    #64748b;
+          --text-dim:      #475569;
+          --particle-op:   0.33;
+        }
+
+        /* ── LIGHT MODE ── */
+        [data-theme="light"] {
+          --bg-base:       #f0f2f8;
+          --bg-panel:      rgba(255,255,255,0.95);
+          --bg-card:       rgba(255,255,255,0.92);
+          --bg-header:     rgba(248,249,252,0.95);
+          --bg-input:      rgba(255,255,255,0.98);
+          --bg-sidebar:    rgba(248,249,252,0.99);
+          --bg-hover:      rgba(124,58,237,0.06);
+          --bg-track:      rgba(230,232,240,0.8);
+          --border:        rgba(0,0,0,0.08);
+          --border-subtle: rgba(0,0,0,0.06);
+          --text-primary:  #0f172a;
+          --text-body:     #1e293b;
+          --text-secondary:#334155;
+          --text-muted:    #475569;
+          --text-dim:      #64748b;
+          --particle-op:   0.12;
+        }
+
+        [data-theme="light"] body { background: #f0f2f8; }
+
+        /* Apply CSS vars to common elements */
+        [data-theme] { background: var(--bg-base); color: var(--text-body); }
+        [data-theme] textarea {
+          background: var(--bg-input) !important;
+          color: var(--text-body) !important;
+          border-color: var(--border) !important;
+        }
+        [data-theme="light"] canvas { opacity: var(--particle-op); }
       `}</style>
 
-      <div style={{minHeight:"100vh",background:"#04040e",color:"#e2e8f0",fontFamily:"'DM Sans',sans-serif",position:"relative"}}>
+      <div data-theme={darkMode?"dark":"light"} style={{minHeight:"100vh",background:"var(--bg-base)",color:"var(--text-body)",fontFamily:"'DM Sans',sans-serif",position:"relative",transition:"background .3s ease,color .3s ease"}}>
         <ParticleCanvas/>
 
         {/* Employee Sidebar — always rendered so slide animation works */}
-        <EmployeeSidebar open={sidebarOpen} onClose={()=>setSidebarOpen(false)} assignments={assignments}/>
+        <EmployeeSidebar
+          open={sidebarOpen}
+          onClose={()=>setSidebarOpen(false)}
+          assignments={assignments}
+          employees={employees}
+          assignmentHistory={assignmentHistory}
+          onResetWorkloads={()=>{ saveEmployees(DEFAULT_EMPLOYEES); setEmployees(DEFAULT_EMPLOYEES); saveAssignmentHistory([]); setAssignmentHistory([]); }}
+        />
 
         {/* LANDING */}
         {phase==="idle"&&(
@@ -1097,6 +1309,9 @@ export default function ChainMind(){
             onSelectProject={setSelectedProject}
             onToggleSidebar={()=>setSidebarOpen(o=>!o)}
             assignments={assignments}
+            employeeCount={employees.length}
+            darkMode={darkMode}
+            toggleTheme={toggleTheme}
           />
         )}
 
@@ -1104,8 +1319,8 @@ export default function ChainMind(){
         {phase!=="idle"&&(
           <div style={{position:"relative",zIndex:1}}>
             {/* Header */}
-            <div style={{borderBottom:"1px solid rgba(255,255,255,0.05)",padding:"12px 26px",display:"flex",alignItems:"center",gap:12,background:"rgba(3,3,12,.82)",backdropFilter:"blur(32px)",WebkitBackdropFilter:"blur(32px)",position:"sticky",top:0,zIndex:10,boxShadow:"0 1px 0 rgba(255,255,255,0.04),0 4px 24px rgba(0,0,0,.4)"}}>
-              <div style={{width:30,height:30,borderRadius:9,background:"linear-gradient(135deg,rgba(124,58,237,.35),rgba(14,165,233,.35))",border:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,backdropFilter:"blur(20px)"}}>⛓</div>
+            <div style={{borderBottom:"1px solid var(--border)",padding:"12px 26px",display:"flex",alignItems:"center",gap:12,background:"var(--bg-header)",backdropFilter:"blur(32px)",WebkitBackdropFilter:"blur(32px)",position:"sticky",top:0,zIndex:10,boxShadow:"0 1px 0 rgba(255,255,255,0.04),0 4px 24px rgba(0,0,0,.4)"}}>
+              <div style={{width:30,height:30,borderRadius:9,background:"linear-gradient(135deg,rgba(124,58,237,.2),rgba(14,165,233,.2))",border:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,backdropFilter:"blur(20px)"}}>⛓</div>
               <div style={{fontWeight:800,fontSize:15,letterSpacing:"-.5px"}}>ChainMind</div>
               <div style={{display:"flex",alignItems:"center",gap:7,padding:"4px 12px",borderRadius:20,background:phase==="done"?"rgba(52,211,153,.08)":phase==="gate"?"rgba(245,158,11,.08)":error?"rgba(244,114,182,.08)":"rgba(124,58,237,.08)",border:`1px solid ${phase==="done"?"rgba(52,211,153,.2)":phase==="gate"?"rgba(245,158,11,.2)":error?"rgba(244,114,182,.2)":"rgba(124,58,237,.2)"}`}}>
                 <div style={{width:6,height:6,borderRadius:"50%",background:phase==="done"?"#34d399":phase==="gate"?"#fbbf24":error?"#f472b6":"#a78bfa",animation:phase==="running"?"breathe 1s infinite":"none"}}/>
@@ -1114,34 +1329,39 @@ export default function ChainMind(){
               {(phase==="running"||phase==="done")&&(
                 <div style={{display:"flex",alignItems:"center",gap:5,padding:"4px 11px",borderRadius:20,background:"rgba(52,211,153,.06)",border:"1px solid rgba(52,211,153,.15)"}}>
                   <span style={{color:"#34d399",fontSize:11,fontFamily:"monospace",fontWeight:700}}>💰 ${totalCost.toFixed(4)}</span>
-                  {phase==="running"&&<span style={{color:"#1a3a2a",fontSize:9,animation:"blink 1s infinite"}}>●</span>}
+                  {phase==="running"&&<span style={{color:"#4ade80",fontSize:9,animation:"blink 1s infinite"}}>●</span>}
                 </div>
               )}
               {/* v9: show project name in header */}
-              <div style={{color:"#1e2a3a",fontSize:10,fontFamily:"monospace",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              <div style={{color:"var(--text-muted)",fontSize:10,fontFamily:"monospace",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                 {selectedProject&&selectedProject.id!=="custom"
-                  ?<><span style={{color:"#475569"}}>{selectedProject.id}</span><span style={{color:"#1e2a3a"}}> · {selectedProject.name}</span></>
+                  ?<><span style={{color:"var(--text-dim)"}}>{selectedProject.id}</span><span style={{color:"var(--text-muted)"}}> · {selectedProject.name}</span></>
                   :`"${goal.substring(0,60)}…"`
                 }
               </div>
               {/* v9: Team button in header */}
               <button onClick={()=>setSidebarOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:6,background:"rgba(124,58,237,0.08)",border:"1px solid rgba(124,58,237,0.2)",borderRadius:7,color:"#a78bfa",padding:"5px 12px",cursor:"pointer",fontFamily:"monospace",fontSize:10,transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.background="rgba(124,58,237,0.15)";}} onMouseLeave={e=>{e.currentTarget.style.background="rgba(124,58,237,0.08)";}}>
-                👥 Team <span style={{background:"rgba(124,58,237,0.2)",borderRadius:10,padding:"1px 6px",fontSize:8,marginLeft:2}}>{EMPLOYEES.length}</span>
+                👥 Team <span style={{background:"rgba(124,58,237,0.2)",borderRadius:10,padding:"1px 6px",fontSize:8,marginLeft:2}}>{employees.length}</span>
               </button>
               <ProviderSelector/>
-              <button onClick={reset} style={{background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:7,color:"#3a4555",padding:"5px 12px",cursor:"pointer",fontFamily:"monospace",fontSize:10,transition:"all .2s"}} onMouseEnter={e=>e.currentTarget.style.color="#94a3b8"} onMouseLeave={e=>e.currentTarget.style.color="#3a4555"}>↺ Reset</button>
+              <button onClick={toggleTheme} title={darkMode?"Switch to Light Mode":"Switch to Dark Mode"} style={{background:darkMode?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.06)",border:`1px solid ${darkMode?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.1)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",display:"flex",alignItems:"center",gap:6,transition:"all .3s"}}>
+                <span style={{fontSize:13}}>{darkMode?"☀️":"🌙"}</span>
+                <span style={{fontSize:9,fontFamily:"monospace",color:darkMode?"#64748b":"#475569",letterSpacing:.5}}>{darkMode?"LIGHT":"DARK"}</span>
+              </button>
+              <button onClick={reset} style={{background:"rgba(255,255,255,.03)",border:"1px solid var(--border)",borderRadius:7,color:"var(--text-muted)",padding:"5px 12px",cursor:"pointer",fontFamily:"monospace",fontSize:10,transition:"all .2s"}} onMouseEnter={e=>e.currentTarget.style.color="#94a3b8"} onMouseLeave={e=>e.currentTarget.style.color="#64748b"}>↺ Reset</button>
             </div>
 
             <div style={{padding:"20px 26px"}}>
               {guard&&<div style={{background:"rgba(236,72,153,.05)",border:"1px solid rgba(236,72,153,.2)",borderRadius:9,padding:"9px 14px",marginBottom:16,color:"#f472b6",fontSize:11,fontFamily:"monospace",animation:"fadeSlideIn .3s ease"}}>{guard}</div>}
               {error&&<div style={{background:"rgba(244,114,182,.05)",border:"1px solid rgba(244,114,182,.2)",borderRadius:9,padding:"9px 14px",marginBottom:16,color:"#f472b6",fontSize:11,fontFamily:"monospace",animation:"fadeSlideIn .3s ease"}}>✕ {error}</div>}
+              {skillGapWarning&&<div style={{background:"rgba(251,191,36,.05)",border:"1px solid rgba(251,191,36,.2)",borderRadius:9,padding:"9px 14px",marginBottom:16,color:"#fbbf24",fontSize:11,fontFamily:"monospace",animation:"fadeSlideIn .3s ease"}}>⚠ {skillGapWarning}</div>}
 
               <div ref={gridRef} style={{display:"grid",gridTemplateColumns:"1fr 1.1fr 1fr",gap:16,position:"relative"}}>
                 <DataFlowOverlay containerRef={gridRef} activeAgent={activeAgentKey} phase={phase} agentCardRefs={agentCardRefs} traceRef={traceRef} memRef={memRef}/>
 
                 {/* LEFT — Agent pipeline */}
                 <div style={{position:"relative",zIndex:2}}>
-                  <div style={{color:"#1a2030",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>AGENT PIPELINE</div>
+                  <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>AGENT PIPELINE</div>
                   <div style={{display:"flex",flexDirection:"column",gap:9}}>
                     {steps.length===0
                       ?WORKFLOW.map((_,i)=><SkeletonCard key={i} index={i} agent={WORKFLOW[i].agent}/>)
@@ -1156,7 +1376,7 @@ export default function ChainMind(){
                 {/* MIDDLE — Thought trace + MCP */}
                 <div style={{display:"flex",flexDirection:"column",gap:13,position:"relative",zIndex:2}}>
                   <div>
-                    <div style={{color:"#1a2030",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>VISUAL WORKFLOW INTERFACE</div>
+                    <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>VISUAL WORKFLOW INTERFACE</div>
                     <div ref={traceRef}><ThoughtTrace entries={trace} isRunning={phase==="running"} hoveredAgent={hoveredAgent}/></div>
                   </div>
                   <MCPPanel active={mcp} pulsing={mcpPulsing} activeAgent={activeAgentKey}/>
@@ -1164,14 +1384,14 @@ export default function ChainMind(){
 
                 {/* RIGHT — Memory + Routing */}
                 <div style={{display:"flex",flexDirection:"column",gap:13,position:"relative",zIndex:2}}>
-                  <div style={{color:"#1a2030",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>MEMORY + ROUTING</div>
+                  <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>MEMORY + ROUTING</div>
                   <RightPanel entries={mem} activeModel={activeModel} stats={mStats} tokenCounts={tokenCounts} isRunning={phase==="running"} memRef={memRef} agentTokens={agentTokens}/>
                 </div>
               </div>
 
               {phase==="done"&&reportText&&(
                 <div style={{marginTop:20}}>
-                  <div style={{color:"#1a2030",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>SYNTHESIZED OUTPUT</div>
+                  <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>SYNTHESIZED OUTPUT</div>
                   <FinalReport reportText={reportText} elapsed={elapsed} tokenCounts={tokenCounts} timings={timings} agentTokens={agentTokens}/>
                 </div>
               )}
