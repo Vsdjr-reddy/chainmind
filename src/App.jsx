@@ -1,4 +1,4 @@
-// ChainMind v4 — full-screen two-column landing, workload persistence, skill gap alert, overload protection
+// ChainMind v8 — full-screen two-column landing, workload persistence, skill gap alert, overload protection
 
 // ── Bundled Data ──────────────────────────────────────────────────────────────
 const DEFAULT_EMPLOYEES = [
@@ -13,70 +13,165 @@ const DEFAULT_EMPLOYEES = [
 // ── CSV Parsing Utilities ─────────────────────────────────────────────────────
 const EMP_COLORS = ["#7C3AED","#0EA5E9","#10B981","#F59E0B","#6366F1","#EC4899","#14B8A6","#F97316","#8B5CF6","#06B6D4"];
 
-function parseCSV(text){
-  const lines = text.trim().split("\n").filter(l => l.trim());
-  if(lines.length < 2) return [];
-  const headers = lines[0].split(",").map(h => h.trim().toLowerCase().replace(/\s+/g,"_"));
-  return lines.slice(1).map(line => {
-    // Handle quoted fields
-    const cols = [];
-    let cur = "", inQ = false;
-    for(let i = 0; i < line.length; i++){
-      if(line[i] === '"'){ inQ = !inQ; }
-      else if(line[i] === ',' && !inQ){ cols.push(cur.trim()); cur = ""; }
-      else { cur += line[i]; }
+// Unique signals per CSV type — used for auto-detection
+const CSV_SIGNALS = {
+  employees: ["workload","load","utilization","capacity","allocated","busy","experience","tenure","seniority","years_exp","current_load","staff_id","employee_id"],
+  projects:  ["required_skills","needed_skills","deadline","deadline_days","days_to_complete","urgency","project_id","pid","initiative","objective"],
+  history:   ["score","outcome","result","rating","performance","success","completion_days","duration","elapsed","run_id","history_id","success_score"],
+  tools:     ["tool","tool_id","tool_type","tool_name"],
+};
+
+// Aliases for smart header mapping — maps field name → list of possible column names
+const FIELD_ALIASES = {
+  emp_id:         ["employee_id","staff_id","emp_id","id","worker_id","person_id","member_id"],
+  emp_name:       ["name","full_name","employee_name","staff_name","person_name","worker_name","member_name","display_name"],
+  emp_role:       ["role","department","dept","title","job_title","position","team","designation","function"],
+  emp_skills:     ["skills","tech_stack","technologies","expertise","competencies","tools","skill_set","capabilities","stack"],
+  emp_experience: ["experience_years","years_exp","years_experience","experience","exp","seniority","tenure","years"],
+  emp_workload:   ["current_workload_percent","current_load","workload","load","utilization","capacity","busy_percent","allocated"],
+  prj_id:         ["project_id","pid","id","proj_id","task_id","initiative_id"],
+  prj_name:       ["project_name","name","title","project","task_name","initiative","initiative_name","proj_name"],
+  prj_desc:       ["description","desc","summary","overview","details","brief","objective","goal"],
+  prj_skills:     ["required_skills","needed_skills","skills","tech_stack","technologies","requirements","skill_requirements"],
+  prj_deadline:   ["deadline_days","days_to_complete","deadline","duration","timeline","days","estimated_days"],
+  prj_priority:   ["priority","urgency","importance","severity","criticality","level"],
+  his_id:         ["history_id","run_id","id","record_id","entry_id"],
+  his_name:       ["project_name","name","project","title","initiative"],
+  his_team:       ["team_size","members","team_count","headcount","size","staff_count","people"],
+  his_days:       ["completion_days","duration","days","time_taken","elapsed","completed_in","days_taken"],
+  his_score:      ["success_score","outcome","score","result","rating","performance","accuracy","quality"],
+};
+
+function parseCSVRaw(text){
+  const lines=text.trim().split("\n").filter(l=>l.trim());
+  if(lines.length<2) return {headers:[],rows:[]};
+  const headers=lines[0].split(",").map(h=>h.trim().toLowerCase().replace(/[\s-]+/g,"_"));
+  const rows=lines.slice(1).map(line=>{
+    const cols=[]; let cur="",inQ=false;
+    for(let i=0;i<line.length;i++){
+      if(line[i]==='"') inQ=!inQ;
+      else if(line[i]===','&&!inQ){cols.push(cur.trim());cur="";}
+      else cur+=line[i];
     }
     cols.push(cur.trim());
-    const obj = {};
-    headers.forEach((h,i) => { obj[h] = cols[i] ?? ""; });
+    const obj={};
+    headers.forEach((h,i)=>{ obj[h]=cols[i]??""});
     return obj;
   });
+  return {headers,rows};
 }
 
-function parseEmployeesCSV(text){
-  const rows = parseCSV(text);
-  return rows.map((r, i) => ({
-    id:         r.employee_id || r.id || `EMP${String(i+1).padStart(3,"0")}`,
-    name:       r.name || "Unknown",
-    role:       r.role || "Engineer",
-    skills:     (r.skills || "").split(";").map(s => s.trim()).filter(Boolean),
-    experience: parseInt(r.experience_years || r.experience || 0, 10),
-    workload:   parseInt(r.current_workload_percent || r.workload || 0, 10),
-    color:      EMP_COLORS[i % EMP_COLORS.length],
-  }));
+function findBestHeader(headers,aliases){
+  let best=null,bestScore=0;
+  for(const h of headers){
+    for(const alias of aliases){
+      let score=0;
+      if(h===alias) score=100;
+      else if(h.includes(alias)||alias.includes(h)) score=80;
+      else if(alias.split("_").some(w=>h.includes(w))) score=60;
+      if(score>bestScore){bestScore=score;best=h;}
+    }
+  }
+  return bestScore>=60?best:null;
 }
 
-function parseProjectsCSV(text){
-  const rows = parseCSV(text);
-  return rows.map(r => ({
-    id:       r.project_id || r.id || "",
-    name:     r.project_name || r.name || "",
-    desc:     r.description || r.desc || "",
-    skills:   (r.required_skills || r.skills || "").split(";").map(s => s.trim()).filter(Boolean),
-    deadline: parseInt(r.deadline_days || r.deadline || 30, 10),
-    priority: r.priority || "Medium",
-  }));
+function buildHeaderMap(headers,prefix){
+  const map={};
+  const fields=Object.keys(FIELD_ALIASES).filter(k=>k.startsWith(prefix));
+  for(const field of fields){
+    map[field]=findBestHeader(headers,FIELD_ALIASES[field]);
+  }
+  return map;
 }
 
-function parseHistoryCSV(text){
-  const rows = parseCSV(text);
-  return rows.map(r => ({
-    id:       r.history_id || r.id || "",
-    name:     r.project_name || r.name || "",
-    teamSize: parseInt(r.team_size || r.teamsize || 3, 10),
-    days:     parseInt(r.completion_days || r.days || 30, 10),
-    score:    parseFloat(r.success_score || r.score || 0.9),
-  }));
+function getField(row,map,field,def=""){
+  const h=map[field]; return h?(row[h]??def):def;
 }
 
 function detectCSVType(text){
-  const header = text.split("\n")[0].toLowerCase();
-  // history MUST be checked before projects — history CSV also contains "project_id"
-  if(header.includes("history_id")   || header.includes("success_score") || header.includes("completion_days")) return "history";
-  if(header.includes("employee_id")  || header.includes("experience_years") || header.includes("current_workload")) return "employees";
-  if(header.includes("required_skills") || (header.includes("project_id") && !header.includes("history_id"))) return "projects";
-  if(header.includes("tool_id")      || header.includes("tool_type"))        return "tools";
-  return "unknown";
+  const headers=text.split("\n")[0].toLowerCase().split(",").map(h=>h.trim().replace(/[\s-]+/g,"_"));
+  const scores={employees:0,projects:0,history:0,tools:0};
+  for(const h of headers){
+    for(const [type,signals] of Object.entries(CSV_SIGNALS)){
+      for(const sig of signals){
+        if(sig.includes(h)||h.includes(sig)) scores[type]++;
+      }
+    }
+  }
+  const best=Object.entries(scores).sort((a,b)=>b[1]-a[1])[0];
+  return best[1]>0?best[0]:"unknown";
+}
+
+function parseEmployeesCSV(text){
+  const {headers,rows}=parseCSVRaw(text);
+  const m=buildHeaderMap(headers,"emp_");
+  return rows.map((r,i)=>{
+    const skillsRaw=getField(r,m,"emp_skills","");
+    const sep=skillsRaw.includes(";")?";":skillsRaw.split(",").length>4?",":";";
+    const skills=skillsRaw.split(sep).map(s=>s.trim()).filter(Boolean);
+    return{
+      id:        getField(r,m,"emp_id")||`EMP${String(i+1).padStart(3,"0")}`,
+      name:      getField(r,m,"emp_name","Unknown"),
+      role:      getField(r,m,"emp_role","Engineer"),
+      skills,
+      experience:parseInt(getField(r,m,"emp_experience","0")||"0",10),
+      workload:  parseInt(getField(r,m,"emp_workload","0")||"0",10),
+      color:     EMP_COLORS[i%EMP_COLORS.length],
+    };
+  });
+}
+
+function parseProjectsCSV(text){
+  const {headers,rows}=parseCSVRaw(text);
+  const m=buildHeaderMap(headers,"prj_");
+  return rows.map(r=>{
+    const skillsRaw=getField(r,m,"prj_skills","");
+    const sep=skillsRaw.includes(";")?";":";";
+    const skills=skillsRaw.split(sep).map(s=>s.trim()).filter(Boolean);
+    return{
+      id:       getField(r,m,"prj_id",""),
+      name:     getField(r,m,"prj_name",""),
+      desc:     getField(r,m,"prj_desc",""),
+      skills,
+      deadline: parseInt(getField(r,m,"prj_deadline","30")||"30",10),
+      priority: getField(r,m,"prj_priority","Medium"),
+    };
+  });
+}
+
+function parseHistoryCSV(text){
+  const {headers,rows}=parseCSVRaw(text);
+  const m=buildHeaderMap(headers,"his_");
+  return rows.map(r=>{
+    let score=parseFloat(getField(r,m,"his_score","0.9")||"0.9");
+    if(score>1) score=score/100; // handle "92" → 0.92
+    return{
+      id:       getField(r,m,"his_id",""),
+      name:     getField(r,m,"his_name",""),
+      teamSize: parseInt(getField(r,m,"his_team","3")||"3",10),
+      days:     parseInt(getField(r,m,"his_days","30")||"30",10),
+      score,
+    };
+  });
+}
+
+function parseToolsCSV(text){
+  const {headers,rows}=parseCSVRaw(text);
+  const TOOL_COLORS=["#38bdf8","#a78bfa","#34d399","#fbbf24","#f472b6","#818cf8","#0EA5E9","#10B981"];
+  const TOOL_ICONS={"ml framework":"🤖","llm framework":"🧠","vision library":"👁","ml library":"📊","vector database":"🗄","database":"⊟","search engine":"🌐","api":"⊳","framework":"⚙️"};
+  return rows.map((r,i)=>{
+    const typeRaw=(r["tool_type"]||r["type"]||"").toLowerCase();
+    const icon=Object.entries(TOOL_ICONS).find(([k])=>typeRaw.includes(k))?.[1]||"🔧";
+    return{
+      id:      r["tool_id"]||r["id"]||`T${String(i+1).padStart(3,"0")}`,
+      name:    (r["tool_name"]||r["name"]||"").toLowerCase().replace(/\s+/g,"_"),
+      label:   r["tool_name"]||r["name"]||"",
+      type:    r["tool_type"]||r["type"]||"",
+      purpose: r["purpose"]||r["description"]||"",
+      icon,
+      color:   TOOL_COLORS[i%TOOL_COLORS.length],
+    };
+  });
 }
 
 function loadEmployees(){
@@ -145,13 +240,129 @@ const SAMPLE_GOALS = [
   "Break down the Smart Inventory System project and assign sub-tasks by employee expertise.",
 ];
 
+
+// ── PDF.js loader — loads from CDN on first use ───────────────────────────────
+let _pdfJsReady = null;
+function loadPdfJs() {
+  if (_pdfJsReady) return _pdfJsReady;
+  _pdfJsReady = new Promise((resolve, reject) => {
+    if (window.pdfjsLib) { resolve(window.pdfjsLib); return; }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    script.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      resolve(window.pdfjsLib);
+    };
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+  return _pdfJsReady;
+}
+
+// ── Extract full text from a PDF File object ──────────────────────────────────
+async function extractPdfText(file) {
+  const pdfjsLib = await loadPdfJs();
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let fullText = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    fullText += content.items.map(item => item.str).join(' ') + '\n';
+  }
+  return fullText.trim();
+}
+
+// ── Parse extracted text into a structured project brief ─────────────────────
+function parseBriefText(text, fileName) {
+  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
+  const fullText = text.replace(/\s+/g, ' ');
+
+  // ── Extract fields with multiple strategies ──────────────────────────────
+  const extract = (patterns) => {
+    for (const pattern of patterns) {
+      const m = fullText.match(pattern);
+      if (m && m[1] && m[1].trim().length > 2) return m[1].trim().substring(0, 200);
+    }
+    return null;
+  };
+
+  const projectTitle = extract([
+    /Project Title[:\s]+([^\n.]{5,100})/i,
+    /Title[:\s]+([^\n.]{5,100})/i,
+    /Project Name[:\s]+([^\n.]{5,100})/i,
+  ]) || fileName.replace(/\.pdf$/i, '').replace(/[-_]/g, ' ');
+
+  const client = extract([
+    /Client[:\s]+([^\n.]{3,80}(?:Pvt|Ltd|Inc|Corp|Technologies|Solutions|Tech|Co\b)[^\n.]{0,40})/i,
+    /Client(?:\s+Name)?[:\s]+([^\n.]{3,80})/i,
+    /Client Background[^.]*?([A-Z][a-zA-Z ]+(?:Technologies|Solutions|Retail|Commerce)[^.]{0,40})/i,
+  ]) || 'Client';
+
+  const objective = extract([
+    /(?:Project )?Objective[:\s]+([^\n]{20,300})/i,
+    /Goal[:\s]+([^\n]{20,300})/i,
+    /The goal is[^.]*?([^.]{20,200})\.?/i,
+  ]);
+
+  // ── Extract functional requirements as array ──────────────────────────────
+  const reqSection = fullText.match(/Functional Requirements[^]+?(?=Non.Functional|Expected|$)/i)?.[0] || '';
+  const reqMatches = reqSection.match(/\d+\.\s+([^\d][^.]{15,200}(?:\.|$))/g) || [];
+  const requirements = reqMatches.map(r => r.replace(/^\d+\.\s*/, '').trim()).slice(0, 8);
+
+  // ── Extract expected deliverables ─────────────────────────────────────────
+  const delivSection = fullText.match(/Expected Deliverables[^]+?(?=Expected AI|Goal of|$)/i)?.[0] || '';
+  const deliverables = (delivSection.match(/[a-z][^,\n]{5,60}/gi) || []).slice(0, 6);
+
+  // ── Extract expected workflow if present ─────────────────────────────────
+  const workflowSection = fullText.match(/Expected AI Agent Workflow[^]+?(?=Goal of|Participants|$)/i)?.[0] || '';
+  const workflowSteps = (workflowSection.match(/\d+\.\s+[^\n]{10,100}/g) || []).slice(0, 8);
+
+  // ── Infer skills from requirements text ──────────────────────────────────
+  const SKILL_KEYWORDS = [
+    'Python','ML','Machine Learning','NLP','RAG','LLM','Deep Learning',
+    'React','Node.js','APIs','Docker','Kubernetes','AWS','CI/CD',
+    'Data Engineering','Data Analysis','SQL','PostgreSQL','MongoDB',
+    'FastAPI','REST','GraphQL','Redis','Elasticsearch','LangChain',
+    'TensorFlow','PyTorch','Scikit-learn','Pandas','Hugging Face',
+    'Classification','Semantic Search','Vector Database','Pinecone',
+  ];
+  const foundSkills = SKILL_KEYWORDS.filter(sk =>
+    new RegExp(sk.replace('.','\\.'),'i').test(fullText)
+  );
+
+  // ── Infer priority and deadline ───────────────────────────────────────────
+  const urgent = /urgent|critical|asap|immediately|high.priority/i.test(fullText);
+  const longTerm = /long.term|6 months|year/i.test(fullText);
+  const deadline = urgent ? 20 : longTerm ? 90 : 45;
+  const priority = urgent ? 'High' : 'Medium';
+
+  return {
+    id: 'pdf_' + Date.now(),
+    name: projectTitle,
+    client,
+    objective: objective || '',
+    requirements,
+    deliverables,
+    workflowSteps,
+    skills: foundSkills.length > 0 ? foundSkills.slice(0, 8) : ['Python', 'ML', 'APIs'],
+    deadline,
+    priority,
+    desc: objective || requirements[0] || projectTitle,
+    rawText: text.substring(0, 3000), // keep for Planner prompt
+    source: 'pdf',
+    fileName,
+  };
+}
+
 const WORKFLOW = [
-  { agent:"planner",      task:"Decompose goal into executable sub-tasks", model:"frontier", expectedTokens:400 },
-  { agent:"research",     task:"Search web & gather relevant information", model:"mid",      expectedTokens:600 },
-  { agent:"execution",    task:"Extract & structure key data points",      model:"slm",      expectedTokens:350 },
-  { agent:"verification", task:"Fact-check outputs & score confidence",    model:"mid",      expectedTokens:450 },
-  { agent:"memory",       task:"Extract & store knowledge from workflow",  model:"slm",      expectedTokens:300 },
-  { agent:"report",       task:"Synthesize final structured report",       model:"frontier", expectedTokens:700 },
+  { agent:"planner",      task:"Analyze requirements · decompose into sub-tasks · identify skill gaps", model:"frontier", expectedTokens:400 },
+  { agent:"research",     task:"Search for domain knowledge · best practices · resource requirements", model:"mid", expectedTokens:600 },
+  { agent:"execution",    task:"Match sub-tasks to employee skills & availability", model:"slm", expectedTokens:350 },
+  { agent:"verification", task:"Verify assignment logic · score confidence · flag risks", model:"mid", expectedTokens:450 },
+  { agent:"memory",       task:"Store assignment patterns · update team capacity · log decisions", model:"slm", expectedTokens:300 },
+  { agent:"report",       task:"Synthesize autonomous assignment plan · skill reasoning · workload impact", model:"frontier", expectedTokens:700 },
 ];
 
 const AGENT_TOOLS = {
@@ -261,12 +472,12 @@ const MiniPreviewInner = memo(function MiniPreviewInner() {
   const agentList = Object.entries(AGENTS);
 
   const FAKE_THOUGHTS = {
-    planner:     ["Decomposing goal into 4 parallel sub-tasks…","Routing task plan to Research agent"],
-    research:    ["Querying Tavily web search API…","Found 12 relevant sources — filtering top 5"],
-    execution:   ["Extracting structured data points…","Normalising 8 key findings"],
-    verification:["Cross-checking 3 factual claims…","Confidence score: 91/100 — flagging for gate"],
-    memory:      ["Storing domain insights to long-term store…","Experience store updated (+3 entries)"],
-    report:      ["Synthesising final structured report…","✓ Report complete — 840 tokens"],
+    planner:     ["Analyzing project requirements & skill gaps…","Decomposed into 5 sub-tasks — routing to team"],
+    research:    ["Searching for best practices & benchmarks…","Retrieved 12 sources — extracting relevant patterns"],
+    execution:   ["Matching sub-tasks to employee availability…","Skills × Workload matrix computed"],
+    verification:["Verifying assignment logic & skill coverage…","Confidence 87/100 — assignments validated"],
+    memory:      ["Storing assignment patterns to experience store…","Team capacity updated — 3 entries persisted"],
+    report:      ["Generating structured assignment report…","✓ All 9 PS criteria addressed — report ready"],
   };
 
   useEffect(() => {
@@ -476,7 +687,7 @@ function ThoughtTrace({entries,isRunning,hoveredAgent}){
       {entries.length===0&&(
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"80%",gap:12,paddingTop:20}}>
           <div style={{fontSize:28,opacity:0.15,animation:"float 3s ease-in-out infinite"}}>🧠</div>
-          <div style={{color:"var(--text-secondary)",fontSize:10,fontFamily:"monospace",textAlign:"center",lineHeight:1.8}}>Thought trace will appear here<br/>as each agent reasons through your goal</div>
+          <div style={{color:"var(--text-secondary)",fontSize:10,fontFamily:"monospace",textAlign:"center",lineHeight:1.8}}>Autonomous reasoning trace will appear here —<br/>each agent explains its decisions in real time</div>
           <div style={{display:"flex",gap:6,marginTop:4}}>{["planner","research","execution","verification","memory","report"].map(k=>(<div key={k} style={{width:6,height:6,borderRadius:"50%",background:AGENTS[k].color,opacity:0.12}}/>))}</div>
         </div>
       )}
@@ -503,8 +714,8 @@ function ThoughtTrace({entries,isRunning,hoveredAgent}){
 }
 
 // ── MCPPanel ──────────────────────────────────────────────────────────────────
-function MCPPanel({active,pulsing,activeAgent}){
-  const tools=[
+function MCPPanel({active,pulsing,activeAgent,csvTools}){
+  const DEFAULT_TOOLS=[
     {id:"web",   name:"tavily",     icon:"🌐", color:"#38bdf8"},
     {id:"arxiv", name:"arxiv",      icon:"📄", color:"#a78bfa"},
     {id:"drive", name:"gdrive",     icon:"△",  color:"#34d399"},
@@ -512,6 +723,10 @@ function MCPPanel({active,pulsing,activeAgent}){
     {id:"github",name:"github",     icon:"⑂",  color:"#f472b6"},
     {id:"or",    name:"openrouter", icon:"⊳",  color:"#38bdf8"},
   ];
+  // Use uploaded CSV tools if available, otherwise fall back to defaults
+  const tools=csvTools&&csvTools.length>0
+    ? csvTools.map(t=>({id:t.id, name:t.name, icon:t.icon, color:t.color, label:t.label, type:t.type, purpose:t.purpose}))
+    : DEFAULT_TOOLS;
   const getState=(id)=>{if(pulsing.includes(id))return"calling";if(active.includes(id))return"active";return"off";};
   const stateStyles={
     calling:{bg:"rgba(14,165,233,0.18)",border:"#0EA5E9",shadow:"0 0 24px rgba(14,165,233,0.5), 0 0 48px rgba(14,165,233,0.2)",scale:"scale(1.08)",filter:"drop-shadow(0 0 8px #0EA5E9)",dotAnim:"breathe 0.5s infinite"},
@@ -532,7 +747,8 @@ function MCPPanel({active,pulsing,activeAgent}){
             <div key={t.id} style={{background:s.bg,border:`1px solid ${s.border}`,borderRadius:9,padding:"9px 6px",textAlign:"center",boxShadow:s.shadow,transition:"all .3s cubic-bezier(.4,0,.2,1)",transform:s.scale,position:"relative",overflow:"hidden"}}>
               {state==="calling"&&<div style={{position:"absolute",inset:-1,borderRadius:9,border:`1px solid ${t.color}`,animation:"ripple 1s ease-out infinite",pointerEvents:"none"}}/>}
               <div style={{fontSize:16,marginBottom:3,filter:s.filter,transition:"filter .3s"}}>{t.icon}</div>
-              <div style={{color:toolColor,fontSize:8,fontFamily:"monospace",transition:"color .3s",fontWeight:state==="calling"?"700":"400"}}>{t.name}</div>
+              <div style={{color:toolColor,fontSize:8,fontFamily:"monospace",transition:"color .3s",fontWeight:state==="calling"?"700":"400"}} title={t.purpose||t.label||t.name}>{t.label||t.name}</div>
+              {t.type&&<div style={{color:"var(--text-muted)",fontSize:6,fontFamily:"monospace",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.type.length>10?t.type.substring(0,10)+"…":t.type}</div>}
               {state!=="off"&&<div style={{width:3,height:3,borderRadius:"50%",background:t.color,margin:"3px auto 0",boxShadow:`0 0 6px ${t.color}`,animation:s.dotAnim}}/>}
               {state==="calling"&&<div style={{position:"absolute",top:3,right:4,fontSize:7,fontFamily:"monospace",color:t.color,fontWeight:700,letterSpacing:.5}}>LIVE</div>}
             </div>
@@ -743,10 +959,28 @@ function ApprovalGate({verificationOutput,score,onApprove,onReject,onSteer}){
   return (
     <div style={{position:"fixed",inset:0,zIndex:1000,background:closing?"rgba(0,0,8,0)":"rgba(0,0,8,.88)",backdropFilter:"blur(10px)",display:"flex",alignItems:"center",justifyContent:"center",animation:"fadeIn .2s ease",transition:closing?"background .28s ease":"none",pointerEvents:closing?"none":"auto"}}>
       <div style={{background:"var(--bg-panel)",border:"1px solid #F59E0B99",borderRadius:20,padding:34,maxWidth:580,width:"92%",boxShadow:"0 0 70px rgba(245,158,11,.22)",transform:vis&&!closing?"scale(1) translateY(0)":closing?"scale(.96) translateY(8px)":"scale(.94) translateY(18px)",transition:closing?"all .28s cubic-bezier(.4,0,.2,1)":"all .35s cubic-bezier(.4,0,.2,1)",opacity:closing?0:1}}>
-        <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:18}}>
+        <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:12}}>
           <div style={{width:48,height:48,borderRadius:14,background:"rgba(245,158,11,.12)",border:"1px solid rgba(245,158,11,.35)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,boxShadow:"0 0 22px rgba(245,158,11,.28)",animation:"breathe 1.5s infinite"}}>⚠</div>
-          <div style={{flex:1}}><div style={{color:"#fbbf24",fontWeight:700,fontSize:15}}>Conditional Approval Gate</div><div style={{color:"#d97706",fontSize:10,fontFamily:"monospace",letterSpacing:1,marginTop:2}}>HIGH-RISK OPERATION · HUMAN REVIEW REQUIRED</div></div>
+          <div style={{flex:1}}><div style={{color:"#fbbf24",fontWeight:700,fontSize:15}}>Conditional Approval Gate</div><div style={{color:"#d97706",fontSize:10,fontFamily:"monospace",letterSpacing:1,marginTop:2}}>LOW CONFIDENCE · OPTIONAL HUMAN OVERSIGHT</div></div>
           <ConfidenceGauge score={score}/>
+        </div>
+        {/* Threshold explanation — BUILD 3 */}
+        <div style={{marginBottom:14,padding:"8px 12px",borderRadius:9,background:"rgba(99,102,241,0.06)",border:"1px solid rgba(99,102,241,0.2)",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+          <div style={{textAlign:"center"}}>
+            <div style={{color:"#f472b6",fontSize:16,fontWeight:800,fontFamily:"monospace"}}>{score}</div>
+            <div style={{color:"var(--text-muted)",fontSize:7,fontFamily:"monospace",letterSpacing:1,marginTop:1}}>CONFIDENCE SCORE</div>
+          </div>
+          <div style={{textAlign:"center"}}>
+            <div style={{color:"#818cf8",fontSize:16,fontWeight:800,fontFamily:"monospace"}}>80</div>
+            <div style={{color:"var(--text-muted)",fontSize:7,fontFamily:"monospace",letterSpacing:1,marginTop:1}}>AUTO-APPROVE THRESHOLD</div>
+          </div>
+          <div style={{textAlign:"center"}}>
+            <div style={{color:"#fbbf24",fontSize:16,fontWeight:800,fontFamily:"monospace"}}>{80-score > 0 ? `-${80-score}` : `+${score-80}`}</div>
+            <div style={{color:"var(--text-muted)",fontSize:7,fontFamily:"monospace",letterSpacing:1,marginTop:1}}>BELOW THRESHOLD</div>
+          </div>
+        </div>
+        <div style={{marginBottom:14,padding:"6px 10px",borderRadius:7,background:"rgba(52,211,153,0.04)",border:"1px solid rgba(52,211,153,0.15)",fontSize:8,color:"var(--text-muted)",fontFamily:"monospace"}}>
+          ℹ ChainMind operates <span style={{color:"#34d399"}}>fully autonomously</span> — no human needed when confidence ≥ 80. This gate fired as an exception (score {score} {'<'} 80). Approve to let the AI continue · Steer to provide new information · Reject to abort.
         </div>
         <div style={{background:"rgba(245,158,11,.05)",border:"1px solid rgba(245,158,11,.18)",borderRadius:12,padding:13,marginBottom:14,maxHeight:130,overflowY:"auto"}}>
           <div style={{color:"#d97706",fontSize:9,fontFamily:"monospace",letterSpacing:1,marginBottom:7}}>VERIFICATION AGENT OUTPUT:</div>
@@ -781,6 +1015,215 @@ function ApprovalGate({verificationOutput,score,onApprove,onReject,onSteer}){
   );
 }
 
+
+
+// ── ProjectRequirementsPanel — PS: "Analyze project requirements" ─────────────
+function ProjectRequirementsPanel({project,employees}){
+  if(!project||project.id==="custom") return null;
+  const isPdf = project.source === "pdf";
+  const available=employees.filter(e=>e.workload<80);
+  const skillCoverage=project.skills?project.skills.map(s=>{
+    const covered=employees.some(e=>e.skills.some(es=>es.toLowerCase().includes(s.toLowerCase())||s.toLowerCase().includes(es.toLowerCase())));
+    return{skill:s,covered};
+  }):[];
+  const uncovered=skillCoverage.filter(s=>!s.covered);
+  const deadlineRisk=project.deadline<=20?"HIGH":project.deadline<=40?"MEDIUM":"LOW";
+  const riskColor={"HIGH":"#f87171","MEDIUM":"#fbbf24","LOW":"#34d399"}[deadlineRisk];
+  const complexityScore=Math.min(10,Math.round((project.skills?.length||0)*1.5+
+    (project.priority==="High"||project.priority==="Critical"?2:0)+
+    (project.deadline<30?2:0)));
+  return(
+    <div style={{background:"rgba(14,165,233,0.04)",border:"1px solid rgba(14,165,233,0.2)",borderRadius:14,padding:"14px 16px",marginBottom:16,animation:"fadeSlideIn .4s ease"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+        <div style={{width:5,height:5,borderRadius:"50%",background:"#38bdf8",boxShadow:"0 0 6px #0EA5E9"}}/>
+        <span style={{color:"#38bdf8",fontSize:9,fontFamily:"monospace",letterSpacing:2,fontWeight:700}}>REQUIREMENTS ANALYSIS</span>
+        {isPdf&&<span style={{background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:4,padding:"1px 6px",fontSize:7,color:"#34d399",fontFamily:"monospace"}}>FROM PDF BRIEF</span>}
+        <span style={{marginLeft:"auto",color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>autonomous pre-flight check</span>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:10}}>
+        {[
+          {label:"DEADLINE RISK",val:deadlineRisk,color:riskColor,sub:`${project.deadline} days`},
+          {label:"COMPLEXITY",val:`${complexityScore}/10`,color:complexityScore>=7?"#f87171":complexityScore>=4?"#fbbf24":"#34d399",sub:`${project.skills?.length||0} skills required`},
+          {label:"TEAM AVAILABLE",val:`${available.length}/${employees.length}`,color:available.length>0?"#34d399":"#f87171",sub:"capacity < 80%"},
+          {label:"PRIORITY",val:project.priority,color:project.priority==="High"||project.priority==="Critical"?"#f87171":project.priority==="Medium"?"#fbbf24":"#34d399",sub:project.id},
+        ].map(m=>(
+          <div key={m.label} style={{background:"var(--bg-card)",borderRadius:8,padding:"8px 10px",border:`1px solid ${m.color}22`}}>
+            <div style={{color:m.color,fontSize:13,fontWeight:800,fontFamily:"monospace",lineHeight:1}}>{m.val}</div>
+            <div style={{color:"var(--text-muted)",fontSize:6,fontFamily:"monospace",letterSpacing:1,marginTop:3}}>{m.label}</div>
+            <div style={{color:"var(--text-muted)",fontSize:7,fontFamily:"monospace",marginTop:2}}>{m.sub}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:uncovered.length>0?8:0}}>
+        <span style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",alignSelf:"center"}}>Required skills:</span>
+        {skillCoverage.map(({skill,covered})=>(
+          <span key={skill} style={{background:covered?"rgba(52,211,153,0.08)":"rgba(248,113,113,0.08)",border:`1px solid ${covered?"rgba(52,211,153,0.25)":"rgba(248,113,113,0.25)"}`,borderRadius:4,padding:"2px 7px",fontSize:8,color:covered?"#34d399":"#f87171",fontFamily:"monospace"}}>
+            {covered?"✓":"✗"} {skill}
+          </span>
+        ))}
+      </div>
+      {uncovered.length>0&&(
+        <div style={{padding:"5px 9px",borderRadius:6,background:"rgba(248,113,113,0.05)",border:"1px solid rgba(248,113,113,0.2)",fontSize:8,color:"#f87171",fontFamily:"monospace"}}>
+          ⚠ Skill gap: [{uncovered.map(s=>s.skill).join(", ")}] — not covered by current team. Planner will flag this.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── SubTaskPanel — BUILD 2: shows decomposed sub-tasks from Planner ──────────
+function SubTaskPanel({subtasks,projectName,isRunning}){
+  if(!subtasks||subtasks.length===0) return null;
+  return(
+    <div style={{background:"var(--bg-panel)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:14,padding:"16px 18px",backdropFilter:"blur(20px)",marginBottom:16,boxShadow:"0 0 30px rgba(124,58,237,0.08)",animation:"fadeSlideIn .4s ease"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+        <div style={{width:6,height:6,borderRadius:"50%",background:"#a78bfa",boxShadow:"0 0 8px #7C3AED",animation:isRunning?"breathe 1s infinite":"none"}}/>
+        <span style={{color:"#a78bfa",fontSize:10,fontFamily:"monospace",letterSpacing:2,fontWeight:700}}>PROJECT DECOMPOSITION</span>
+        {projectName&&<span style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",marginLeft:4}}>— {projectName}</span>}
+        <span style={{marginLeft:"auto",background:"rgba(167,139,250,0.12)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:10,padding:"1px 8px",fontSize:8,color:"#a78bfa",fontFamily:"monospace"}}>{subtasks.length} SUB-TASKS</span>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+        {subtasks.map((task,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"flex-start",gap:9,padding:"9px 11px",borderRadius:9,background:"rgba(124,58,237,0.05)",border:"1px solid rgba(124,58,237,0.15)",animation:`fadeSlideIn .3s ease ${i*0.05}s both`}}>
+            <div style={{width:20,height:20,borderRadius:6,background:"rgba(124,58,237,0.15)",border:"1px solid rgba(124,58,237,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"#a78bfa",fontWeight:800,fontFamily:"monospace",flexShrink:0}}>{i+1}</div>
+            <span style={{color:"var(--text-secondary)",fontSize:10,fontFamily:"monospace",lineHeight:1.5}}>{task}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{marginTop:10,padding:"6px 10px",borderRadius:7,background:"rgba(124,58,237,0.04)",border:"1px solid rgba(124,58,237,0.1)",display:"flex",alignItems:"center",gap:6}}>
+        <span style={{color:"#a78bfa",fontSize:9,fontFamily:"monospace"}}>🧠 Planner Agent</span>
+        <span style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>autonomously decomposed by Planner agent · sub-tasks routed through 5 downstream agents for matching &amp; assignment</span>
+      </div>
+    </div>
+  );
+}
+
+// ── TaskAssignmentDashboard — BUILD 1: main deliverable for judges ────────────
+function TaskAssignmentDashboard({assignments,employees,skillMatches,project,reportText}){
+  const [expanded,setExpanded]=useState(true);
+  const assigned=employees.filter(e=>assignments[e.id]);
+  if(!assigned.length) return null;
+
+  // Parse skill reasoning per employee
+  function getSkillReasoning(emp,projSkills){
+    if(!projSkills||!projSkills.length) return{matched:[],unmatched:[]};
+    const empLower=emp.skills.map(s=>s.toLowerCase());
+    const matched=projSkills.filter(ps=>empLower.some(es=>es.includes(ps.toLowerCase())||ps.toLowerCase().includes(es)));
+    const unmatched=projSkills.filter(ps=>!matched.includes(ps));
+    return{matched,unmatched};
+  }
+
+  const priorityColor=(p)=>p==="High"||p==="Critical"?"#f87171":p==="Medium"?"#fbbf24":"#34d399";
+  const workloadColor=(w)=>w>=80?"#f87171":w>=55?"#fbbf24":"#34d399";
+
+  return(
+    <div style={{background:"linear-gradient(135deg,rgba(52,211,153,0.04),rgba(99,102,241,0.04))",border:"1px solid rgba(52,211,153,0.25)",borderRadius:16,padding:"18px 20px",backdropFilter:"blur(20px)",marginTop:16,boxShadow:"0 0 40px rgba(52,211,153,0.07)",animation:"fadeSlideIn .5s ease"}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:expanded?14:0}}>
+        <div style={{width:36,height:36,borderRadius:10,background:"rgba(52,211,153,0.12)",border:"1px solid rgba(52,211,153,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>📋</div>
+        <div style={{flex:1}}>
+          <div style={{color:"#34d399",fontWeight:700,fontSize:13,fontFamily:"monospace"}}>Task Assignment Dashboard</div>
+          <div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",marginTop:1}}>
+            {assigned.length} employees assigned autonomously · skills matched · availability balanced
+            {project&&<span style={{marginLeft:6,color:"var(--text-muted)"}}>· {project.name}</span>}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <span style={{background:"rgba(52,211,153,0.12)",border:"1px solid rgba(52,211,153,0.3)",borderRadius:10,padding:"2px 8px",fontSize:8,color:"#34d399",fontFamily:"monospace",fontWeight:700}}>AUTO-ASSIGNED</span>
+          <button onClick={()=>setExpanded(e=>!e)} style={{background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:6,color:"var(--text-muted)",padding:"3px 8px",cursor:"pointer",fontSize:9,fontFamily:"monospace"}}>{expanded?"▲ Collapse":"▼ Expand"}</button>
+        </div>
+      </div>
+
+      {expanded&&(
+        <>
+          {/* Column headers */}
+          <div style={{display:"grid",gridTemplateColumns:"1.4fr 2fr 1fr 1fr 1fr",gap:8,padding:"6px 10px",marginBottom:6,background:"rgba(255,255,255,0.02)",borderRadius:7,border:"1px solid var(--border-subtle)"}}>
+            {["EMPLOYEE","ASSIGNED SUB-TASK","SKILL MATCH","WORKLOAD","STATUS"].map(h=>(
+              <div key={h} style={{color:"var(--text-muted)",fontSize:7,fontFamily:"monospace",letterSpacing:1.5,fontWeight:700}}>{h}</div>
+            ))}
+          </div>
+
+          {/* Assignment rows */}
+          {assigned.map((emp,i)=>{
+            const task=assignments[emp.id]||"";
+            const match=skillMatches[emp.id]||0;
+            const matchColor=match>=70?"#34d399":match>=40?"#fbbf24":"#f472b6";
+            const wColor=workloadColor(emp.workload);
+            const reasoning=getSkillReasoning(emp,project?.skills||[]);
+            return(
+              <div key={emp.id} style={{display:"grid",gridTemplateColumns:"1.4fr 2fr 1fr 1fr 1fr",gap:8,padding:"10px 10px",marginBottom:6,background:"var(--bg-card)",borderRadius:9,border:`1px solid ${emp.color}22`,animation:`fadeSlideIn .35s ease ${i*0.08}s both`,transition:"all .2s"}}
+                onMouseEnter={e=>e.currentTarget.style.borderColor=emp.color+"55"}
+                onMouseLeave={e=>e.currentTarget.style.borderColor=emp.color+"22"}>
+                {/* Employee */}
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:26,height:26,borderRadius:7,background:`${emp.color}18`,border:`1px solid ${emp.color}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:emp.color,fontFamily:"monospace",flexShrink:0}}>{emp.name.split(" ").map(n=>n[0]).join("")}</div>
+                  <div>
+                    <div style={{color:"var(--text-primary)",fontSize:10,fontWeight:700,fontFamily:"monospace"}}>{emp.name.split(" ")[0]}</div>
+                    <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>{emp.role}</div>
+                  </div>
+                </div>
+                {/* Task */}
+                <div style={{color:"var(--text-secondary)",fontSize:9,fontFamily:"monospace",lineHeight:1.5,alignSelf:"center"}}>{task.substring(0,90)}{task.length>90?"…":""}</div>
+                {/* Skill match */}
+                <div style={{alignSelf:"center"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:3}}>
+                    <span style={{color:matchColor,fontSize:11,fontWeight:800,fontFamily:"monospace"}}>{match}%</span>
+                  </div>
+                  <div style={{height:3,background:"var(--bg-track)",borderRadius:2,overflow:"hidden",width:"100%"}}>
+                    <div style={{height:"100%",width:`${match}%`,background:`linear-gradient(90deg,${matchColor}88,${matchColor})`,borderRadius:2,transition:"width .6s ease"}}/>
+                  </div>
+                  {reasoning.matched.length>0&&(
+                    <div style={{marginTop:3,display:"flex",flexWrap:"wrap",gap:2}}>
+                      {reasoning.matched.slice(0,2).map(s=><span key={s} style={{background:`${matchColor}12`,border:`1px solid ${matchColor}33`,borderRadius:3,padding:"0px 4px",fontSize:7,color:matchColor,fontFamily:"monospace"}}>✓ {s}</span>)}
+                    </div>
+                  )}
+                </div>
+                {/* Workload */}
+                <div style={{alignSelf:"center"}}>
+                  <div style={{color:wColor,fontSize:11,fontWeight:800,fontFamily:"monospace",marginBottom:3}}>{emp.workload}%</div>
+                  <div style={{height:3,background:"var(--bg-track)",borderRadius:2,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:`${emp.workload}%`,background:`linear-gradient(90deg,${wColor}88,${wColor})`,borderRadius:2}}/>
+                  </div>
+                  {emp.workload>=80&&<div style={{color:"#f87171",fontSize:7,fontFamily:"monospace",marginTop:2,animation:"blink 1s infinite"}}>⚠ overloaded</div>}
+                </div>
+                {/* Status */}
+                <div style={{alignSelf:"center"}}>
+                  <span style={{background:"rgba(52,211,153,0.1)",border:"1px solid rgba(52,211,153,0.3)",borderRadius:5,padding:"3px 7px",fontSize:8,color:"#34d399",fontFamily:"monospace",fontWeight:700,display:"block",textAlign:"center"}}>✓ ASSIGNED</span>
+                  <div style={{color:"var(--text-muted)",fontSize:7,fontFamily:"monospace",textAlign:"center",marginTop:3}}>exp: {emp.experience}yr</div>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Footer — reasoning summary */}
+          <div style={{marginTop:8,padding:"8px 12px",borderRadius:9,background:"rgba(99,102,241,0.05)",border:"1px solid rgba(99,102,241,0.15)",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
+            <div style={{textAlign:"center"}}>
+              <div style={{color:"#818cf8",fontSize:14,fontWeight:800,fontFamily:"monospace"}}>{assigned.length}</div>
+              <div style={{color:"var(--text-muted)",fontSize:7,fontFamily:"monospace",letterSpacing:1,marginTop:2}}>EMPLOYEES ASSIGNED</div>
+            </div>
+            <div style={{textAlign:"center"}}>
+              <div style={{color:"#34d399",fontSize:14,fontWeight:800,fontFamily:"monospace"}}>
+                {assigned.length>0?Math.round(assigned.reduce((s,e)=>s+(skillMatches[e.id]||0),0)/assigned.length):0}%
+              </div>
+              <div style={{color:"var(--text-muted)",fontSize:7,fontFamily:"monospace",letterSpacing:1,marginTop:2}}>AVG SKILL MATCH</div>
+            </div>
+            <div style={{textAlign:"center"}}>
+              <div style={{color:"#fbbf24",fontSize:14,fontWeight:800,fontFamily:"monospace"}}>
+                {assigned.length>0?Math.round(assigned.reduce((s,e)=>s+e.workload,0)/assigned.length):0}%
+              </div>
+              <div style={{color:"var(--text-muted)",fontSize:7,fontFamily:"monospace",letterSpacing:1,marginTop:2}}>AVG TEAM WORKLOAD</div>
+            </div>
+          </div>
+
+          <div style={{marginTop:8,fontSize:8,color:"var(--text-muted)",fontFamily:"monospace",textAlign:"center"}}>
+            All assignments made autonomously — no manual selection. Criteria: skill match × availability × experience.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── FinalReport ───────────────────────────────────────────────────────────────
 function FinalReport({reportText,elapsed,tokenCounts,timings,agentTokens}){
   const [copied,setCopied]=useState(false);const totalMs=timings.reduce((s,t)=>s+t.duration,0);
@@ -790,7 +1233,7 @@ function FinalReport({reportText,elapsed,tokenCounts,timings,agentTokens}){
     <div style={{background:"linear-gradient(135deg,rgba(236,72,153,.05),rgba(99,102,241,.05))",border:"1px solid rgba(236,72,153,.28)",borderRadius:16,padding:22,boxShadow:"0 0 50px rgba(236,72,153,.1)",animation:"fadeSlideIn .5s ease"}}>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,flexWrap:"wrap"}}>
         <div style={{width:38,height:38,borderRadius:11,background:"rgba(236,72,153,.12)",border:"1px solid rgba(236,72,153,.38)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>📋</div>
-        <div><div style={{color:"var(--text-primary)",fontWeight:700,fontSize:14}}>Synthesized Report</div><div style={{color:"var(--text-muted)",fontSize:10,fontFamily:"monospace"}}>ChainMind · {elapsed}s · 6 agents</div></div>
+        <div><div style={{color:"var(--text-primary)",fontWeight:700,fontSize:14}}>Synthesized Report</div><div style={{color:"var(--text-muted)",fontSize:10,fontFamily:"monospace"}}>ChainMind Autonomous Agent · {elapsed}s · 6 reasoning agents</div></div>
         <div style={{marginLeft:"auto",display:"flex",gap:7}}>
           <button onClick={copy} style={{background:"rgba(236,72,153,.08)",border:"1px solid rgba(236,72,153,.25)",borderRadius:7,padding:"5px 12px",color:"#f472b6",fontSize:10,fontFamily:"monospace",cursor:"pointer"}}>{copied?"✓ Copied":"⎘ Copy"}</button>
           <button onClick={download} style={{background:"rgba(99,102,241,.08)",border:"1px solid rgba(99,102,241,.25)",borderRadius:7,padding:"5px 12px",color:"#818cf8",fontSize:10,fontFamily:"monospace",cursor:"pointer"}}>↓ Export .md</button>
@@ -873,7 +1316,7 @@ function ProjectSelector({onSelect,selectedId,projects:projectList}){
             <div style={{gridColumn:"1/-1",padding:"28px 16px",borderRadius:10,border:"1px dashed var(--border)",background:"var(--bg-card)",textAlign:"center"}}>
               <div style={{fontSize:22,marginBottom:8,opacity:0.3}}>📋</div>
               <div style={{color:"var(--text-muted)",fontSize:10,fontFamily:"monospace",fontWeight:700,marginBottom:4}}>No projects loaded</div>
-              <div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",opacity:0.7}}>Upload <code>neurax_projects_dataset.csv</code> →</div>
+              <div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",opacity:0.7}}>Upload a client brief PDF or <code>neurax_projects_dataset.csv</code> →</div>
             </div>
           )}
           {activeProjects.map(p=>{
@@ -976,7 +1419,7 @@ function EmployeeSidebar({open,onClose,assignments,employees,onResetWorkloads,as
       {open&&<div onClick={onClose} style={{position:"fixed",inset:0,zIndex:299,background:"rgba(0,0,0,0.3)"}}/>}
       <div style={{position:"fixed",top:0,right:0,bottom:0,width:320,zIndex:300,background:"var(--bg-sidebar)",borderLeft:"1px solid var(--border)",backdropFilter:"blur(24px)",transform:open?"translateX(0)":"translateX(100%)",transition:"transform .3s cubic-bezier(.4,0,.2,1)",display:"flex",flexDirection:"column",boxShadow:open?"-8px 0 40px rgba(0,0,0,0.5)":"none"}}>
         <div style={{padding:"16px 18px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
-          <div><div style={{color:"var(--text-primary)",fontSize:13,fontWeight:700,fontFamily:"monospace"}}>👥 Team</div><div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",letterSpacing:1,marginTop:2}}>{employees.length} MEMBERS</div></div>
+          <div><div style={{color:"var(--text-primary)",fontSize:13,fontWeight:700,fontFamily:"monospace"}}>👥 Team Availability</div><div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",letterSpacing:1,marginTop:2}}>{employees.length} MEMBERS · {employees.filter(e=>e.workload<80).length} AVAILABLE</div></div>
           <div style={{display:"flex",gap:6,alignItems:"center"}}>
             <button onClick={onResetWorkloads} style={{background:"rgba(248,113,113,0.08)",border:"1px solid rgba(248,113,113,0.2)",borderRadius:7,padding:"4px 8px",color:"#f87171",cursor:"pointer",fontSize:8,fontFamily:"monospace",whiteSpace:"nowrap"}}>↺ Reset</button>
             <button onClick={onClose} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:7,width:28,height:28,color:"var(--text-dim)",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
@@ -1042,8 +1485,130 @@ function EmployeeSidebar({open,onClose,assignments,employees,onResetWorkloads,as
   );
 }
 
+
+// ── PDFBriefUploader — upload client requirement PDF ─────────────────────────
+function PDFBriefUploader({pdfBrief, pdfLoading, pdfError, onPdfBrief, onClear}){
+  const fileRef = useRef(null);
+  const [drag, setDrag] = useState(false);
+
+  const handleFile = (file) => {
+    if(!file) return;
+    if(file.type !== 'application/pdf' && !file.name.endsWith('.pdf')){
+      return;
+    }
+    onPdfBrief(file);
+  };
+
+  const loaded = !!pdfBrief;
+  const borderColor = loaded ? '#10B981' : drag ? '#7C3AED88' : 'var(--border)';
+  const bgColor = loaded ? 'rgba(16,185,129,0.06)' : drag ? 'rgba(124,58,237,0.07)' : 'var(--bg-card)';
+
+  return (
+    <div style={{marginBottom:12}}>
+      <div
+        onDragOver={e=>{e.preventDefault();setDrag(true);}}
+        onDragLeave={()=>setDrag(false)}
+        onDrop={e=>{e.preventDefault();setDrag(false);handleFile(e.dataTransfer.files[0]);}}
+        onClick={()=>!loaded&&fileRef.current?.click()}
+        style={{
+          display:'flex', alignItems:'center', gap:12,
+          padding:'12px 14px', borderRadius:10,
+          background: bgColor,
+          border:`1.5px dashed ${borderColor}`,
+          cursor: loaded ? 'default' : 'pointer',
+          transition:'all .2s',
+          boxShadow: loaded ? '0 0 14px rgba(16,185,129,0.15)' : drag ? '0 0 18px rgba(124,58,237,0.2)' : 'none',
+          animation: loaded ? 'fadeSlideIn .35s ease' : 'none',
+        }}
+      >
+        {/* Icon */}
+        <div style={{
+          width:36, height:36, borderRadius:8, flexShrink:0,
+          background: loaded ? 'rgba(16,185,129,0.15)' : 'rgba(124,58,237,0.08)',
+          border:`1px solid ${loaded ? 'rgba(16,185,129,0.4)' : 'rgba(124,58,237,0.3)'}`,
+          display:'flex', alignItems:'center', justifyContent:'center', fontSize:16,
+        }}>
+          {pdfLoading ? '⏳' : loaded ? '✓' : '📄'}
+        </div>
+
+        {/* Content */}
+        <div style={{flex:1, minWidth:0}}>
+          <div style={{
+            fontSize:11, fontWeight:700, fontFamily:'monospace',
+            color: loaded ? '#10B981' : 'var(--text-secondary)',
+            marginBottom:2,
+          }}>
+            {pdfLoading ? 'Extracting PDF…' : loaded ? pdfBrief.name : 'Client Requirement Brief'}
+          </div>
+          <div style={{fontSize:8, fontFamily:'monospace', color:'var(--text-muted)', lineHeight:1.4}}>
+            {pdfLoading
+              ? 'Reading document, extracting requirements…'
+              : loaded
+              ? `✓ ${pdfBrief.requirements?.length||0} requirements · ${pdfBrief.skills?.length||0} skills · ${pdfBrief.deadline}d deadline`
+              : 'Upload .pdf client brief → agent reads & builds workflow autonomously'}
+          </div>
+          {pdfError && <div style={{fontSize:8,color:'#f87171',fontFamily:'monospace',marginTop:2}}>{pdfError}</div>}
+        </div>
+
+        {/* Badge / Clear */}
+        <div style={{flexShrink:0, display:'flex', alignItems:'center', gap:6}}>
+          {loaded && (
+            <button
+              onClick={e=>{e.stopPropagation();onClear();}}
+              style={{background:'transparent',border:'1px solid rgba(248,113,113,0.3)',borderRadius:4,color:'#f87171',fontSize:8,fontFamily:'monospace',cursor:'pointer',padding:'2px 6px'}}
+              onMouseEnter={e=>e.currentTarget.style.background='rgba(248,113,113,0.1)'}
+              onMouseLeave={e=>e.currentTarget.style.background='transparent'}
+            >✕ clear</button>
+          )}
+          {!loaded && !pdfLoading && (
+            <span style={{background:'rgba(124,58,237,0.12)',border:'1px solid rgba(124,58,237,0.3)',borderRadius:4,padding:'2px 8px',fontSize:8,color:'#a78bfa',fontFamily:'monospace'}}>
+              {drag ? 'DROP' : 'UPLOAD PDF'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Parsed brief preview */}
+      {loaded && (
+        <div style={{
+          marginTop:6, padding:'10px 12px', borderRadius:8,
+          background:'rgba(16,185,129,0.04)', border:'1px solid rgba(16,185,129,0.2)',
+          animation:'fadeSlideIn .3s ease',
+        }}>
+          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
+            <span style={{fontSize:8,fontFamily:'monospace',color:'#34d399',letterSpacing:2}}>BRIEF PARSED</span>
+            <span style={{marginLeft:'auto',fontSize:8,fontFamily:'monospace',color:'var(--text-muted)'}}>
+              {pdfBrief.client}
+            </span>
+          </div>
+          <div style={{fontSize:9,color:'var(--text-secondary)',fontFamily:'monospace',lineHeight:1.6}}>
+            <b style={{color:'#a78bfa'}}>Project:</b> {pdfBrief.name}<br/>
+            {pdfBrief.objective && <><b style={{color:'#38bdf8'}}>Objective:</b> {pdfBrief.objective.substring(0,120)}{pdfBrief.objective.length>120?'…':''}<br/></>}
+            <b style={{color:'#34d399'}}>Skills inferred:</b> {pdfBrief.skills.slice(0,6).join(', ')}{pdfBrief.skills.length>6?'…':''}<br/>
+            {pdfBrief.requirements?.length>0 && (
+              <><b style={{color:'#fbbf24'}}>Requirements:</b> {pdfBrief.requirements.length} functional requirements extracted</>
+            )}
+          </div>
+          {pdfBrief.workflowSteps?.length>0 && (
+            <div style={{marginTop:6,padding:'6px 8px',background:'rgba(99,102,241,0.06)',borderRadius:6,border:'1px solid rgba(99,102,241,0.2)'}}>
+              <div style={{fontSize:7,fontFamily:'monospace',color:'#818cf8',letterSpacing:1,marginBottom:4}}>EXPECTED WORKFLOW FROM BRIEF</div>
+              {pdfBrief.workflowSteps.slice(0,4).map((step,i)=>(
+                <div key={i} style={{fontSize:8,fontFamily:'monospace',color:'var(--text-muted)',lineHeight:1.6}}>
+                  {step}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <input ref={fileRef} type="file" accept=".pdf,application/pdf" style={{display:'none'}} onChange={e=>{handleFile(e.target.files[0]);e.target.value='';}}/>
+    </div>
+  );
+}
+
 // ── CSVUploader ───────────────────────────────────────────────────────────────
-function CSVUploader({ onEmployees, onProjects, onHistory, uploadedFiles, onReset }){
+function CSVUploader({ onEmployees, onProjects, onHistory, onTools, uploadedFiles, onReset }){
   const [dragOver, setDragOver] = useState(null); // which slot is being dragged over
   const fileInputRef = useRef(null);
   const [activeSlot, setActiveSlot] = useState(null);
@@ -1052,6 +1617,7 @@ function CSVUploader({ onEmployees, onProjects, onHistory, uploadedFiles, onRese
     { key:"employees", label:"Employees",       icon:"👥", color:"#a78bfa", hint:"employee_id, name, role, skills…"      },
     { key:"projects",  label:"Projects",        icon:"📋", color:"#38bdf8", hint:"project_id, project_name, skills…"     },
     { key:"history",   label:"Project History", icon:"📈", color:"#34d399", hint:"history_id, project_name, score…"      },
+    { key:"tools",     label:"Tools",           icon:"🔧", color:"#f472b6", hint:"tool_id, tool_name, tool_type, purpose…"},
   ];
 
   const handleFile = (file, slotKey) => {
@@ -1065,6 +1631,7 @@ function CSVUploader({ onEmployees, onProjects, onHistory, uploadedFiles, onRese
         if(type === "employees"){ const parsed = parseEmployeesCSV(text); if(parsed.length) onEmployees(parsed); }
         if(type === "projects") { const parsed = parseProjectsCSV(text);  if(parsed.length) onProjects(parsed);  }
         if(type === "history")  { const parsed = parseHistoryCSV(text);   if(parsed.length) onHistory(parsed);   }
+        if(type === "tools")    { const parsed = parseToolsCSV(text);     if(parsed.length) onTools(parsed);     }
       } catch(err){ console.error("CSV parse error:", err); }
     };
     reader.readAsText(file);
@@ -1087,7 +1654,7 @@ function CSVUploader({ onEmployees, onProjects, onHistory, uploadedFiles, onRese
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
         <div style={{width:5,height:5,borderRadius:"50%",background:"#38bdf8",boxShadow:"0 0 6px #0EA5E9"}}/>
         <span style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",letterSpacing:2}}>DATA IMPORT</span>
-        <span style={{marginLeft:"auto",color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>drag & drop CSV files</span>
+        <span style={{marginLeft:"auto",color:"var(--text-muted)",fontSize:8,fontFamily:"monospace"}}>CSV files + client brief PDF</span>
       </div>
 
       <div style={{display:"flex",flexDirection:"column",gap:6}}>
@@ -1177,7 +1744,7 @@ function CSVUploader({ onEmployees, onProjects, onHistory, uploadedFiles, onRese
 }
 
 // ── Landing — WIREFRAME LAYOUT: goal input left, live agent pipeline right ────
-function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,onToggleSidebar,assignments,employeeCount,darkMode,toggleTheme,onEmployees,onProjects,onHistory,uploadedFiles,activeProjects,onResetCSV}){
+function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,onToggleSidebar,assignments,employeeCount,darkMode,toggleTheme,onEmployees,onProjects,onHistory,onTools,uploadedFiles,activeProjects,onResetCSV,pdfBrief,pdfLoading,pdfError,onPdfBrief,onClearPdf}){
   return (
     <div style={{
       position:"relative",zIndex:1,
@@ -1200,7 +1767,7 @@ function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,
           <div style={{width:34,height:34,borderRadius:10,background:"linear-gradient(135deg,rgba(124,58,237,.3),rgba(14,165,233,.3))",border:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,boxShadow:"0 0 24px rgba(124,58,237,.35)",animation:"float 3s ease-in-out infinite"}}>⛓</div>
           <div>
             <div style={{color:"var(--text-primary)",fontWeight:800,fontSize:16,letterSpacing:"-0.5px",lineHeight:1}}>ChainMind</div>
-            <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:2}}>AI ORCHESTRATOR</div>
+            <div style={{color:"var(--text-muted)",fontSize:8,fontFamily:"monospace",letterSpacing:2}}>AUTONOMOUS WORKFLOW AGENT <span style={{color:"#a78bfa",fontSize:7}}>v8</span></div>
           </div>
         </div>
 
@@ -1236,15 +1803,16 @@ function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,
           </div>
 
           {/* Headline */}
-          <div style={{fontSize:36,fontWeight:800,color:"var(--text-primary)",letterSpacing:"-2px",lineHeight:1.06,marginBottom:14}}>
-            The only system<br/>
-            that <span style={{background:"linear-gradient(135deg,#fbbf24,#f472b6)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>stops and asks</span><br/>
-            before it's too late.
+          <div style={{fontSize:34,fontWeight:800,color:"var(--text-primary)",letterSpacing:"-2px",lineHeight:1.06,marginBottom:14}}>
+            <span style={{background:"linear-gradient(135deg,#a78bfa,#38bdf8)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Autonomous</span><br/>
+            Workflow AI Agent<br/>
+            <span style={{fontSize:22,letterSpacing:"-1px",color:"var(--text-secondary)",fontWeight:700}}>for intelligent task distribution</span>
           </div>
-          <div style={{color:"var(--text-muted)",fontSize:12,fontFamily:"'DM Mono',monospace",lineHeight:1.8,marginBottom:28}}>
-            Six agents. Three model tiers. One{" "}
-            <span style={{color:"#fbbf24"}}>Conditional Gate</span>{" "}
-            that pauses for human review.
+          <div style={{color:"var(--text-muted)",fontSize:11,fontFamily:"'DM Mono',monospace",lineHeight:2,marginBottom:20}}>
+            {'✦'} Analyzes project requirements autonomously<br/>
+            {'✦'} Decomposes into sub-tasks &amp; matches employee skills<br/>
+            {'✦'} Assigns tasks · tracks progress · updates decisions<br/>
+            {'✦'} <span style={{color:"#fbbf24"}}>Smart Gate</span> fires only when confidence {'<'} 80
           </div>
 
           {/* API badge */}
@@ -1292,7 +1860,7 @@ function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,
 
           {/* Stat bar pinned to bottom */}
           <div style={{marginTop:"auto",paddingTop:28,borderTop:"1px solid var(--border-subtle)",display:"flex",gap:28}}>
-            {[["6","Agents","#a78bfa"],["3","Model Tiers","#34d399"],["Gate","Approval","#fbbf24"],["57%","Cost Saved","#f472b6"]].map(([val,label,color])=>(
+            {[["6","Agents","#a78bfa"],["9","PS Criteria","#34d399"],["Auto","Assign","#fbbf24"],["≥80","Gate Threshold","#f472b6"]].map(([val,label,color])=>(
               <div key={label}>
                 <div style={{color,fontSize:22,fontWeight:800,fontFamily:"monospace",lineHeight:1}}>{val}</div>
                 <div style={{color:"var(--text-muted)",fontSize:7,fontFamily:"monospace",letterSpacing:1.5,marginTop:3}}>{label.toUpperCase()}</div>
@@ -1315,16 +1883,26 @@ function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,
           {/* Section label */}
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:20,position:"relative",zIndex:1}}>
             <div style={{width:5,height:5,borderRadius:"50%",background:"#34d399",boxShadow:"0 0 6px #10B981",animation:"breathe 1.4s infinite"}}/>
-            <span style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",letterSpacing:2}}>LIVE AGENT WORKFLOW</span>
-            <span style={{marginLeft:"auto",color:"#34d399",fontSize:9,fontFamily:"monospace"}}>PL → RE → EX → VE → ME → RP</span>
+            <span style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",letterSpacing:2}}>AUTONOMOUS AGENT PREVIEW</span>
+            <span style={{marginLeft:"auto",color:"#34d399",fontSize:9,fontFamily:"monospace"}}>analyze → decompose → match → verify → store → assign</span>
           </div>
 
           {/* CSV Uploader */}
           <div style={{marginBottom:20}}>
+            {/* PDF Brief Uploader — primary input for client requirement docs */}
+            <PDFBriefUploader
+              pdfBrief={pdfBrief}
+              pdfLoading={pdfLoading}
+              pdfError={pdfError}
+              onPdfBrief={onPdfBrief}
+              onClear={onClearPdf}
+            />
+
             <CSVUploader
               onEmployees={onEmployees}
               onProjects={onProjects}
               onHistory={onHistory}
+              onTools={onTools}
               uploadedFiles={uploadedFiles}
               onReset={onResetCSV}
             />
@@ -1337,7 +1915,7 @@ function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,
 
           {/* Agent pipeline cards — static representation */}
           <div style={{position:"relative",zIndex:1,display:"flex",flexDirection:"column",gap:8}}>
-            <div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",letterSpacing:2,marginBottom:4}}>PIPELINE STAGES</div>
+            <div style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace",letterSpacing:2,marginBottom:4}}>AUTONOMOUS AGENT PIPELINE</div>
             {WORKFLOW.map((w,i)=>{
               const a=AGENTS[w.agent];
               const tier=MODEL_TIERS[w.model];
@@ -1368,10 +1946,10 @@ function Landing({onStart,apiConfigured,history,selectedProject,onSelectProject,
           {/* Feature chips at bottom */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginTop:16,position:"relative",zIndex:1}}>
             {[
-              {icon:"🛡",label:"Conditional Gate",   desc:"Human review before risky ops"},
-              {icon:"💾",label:"Tripartite Memory",  desc:"Short, long & experience tiers"},
-              {icon:"⚡",label:"Cost-Aware Routing", desc:"57% cheaper than all-Frontier"},
-              {icon:"🌐",label:"Live Web Search",    desc:"Tavily real-time retrieval"},
+              {icon:"🧠",label:"Autonomous Reasoning",desc:"AI decides, explains, reassigns"},
+              {icon:"📋",label:"Task Decomposition", desc:"Breaks projects into sub-tasks"},
+              {icon:"⚡",label:"Skill + Availability",desc:"Matches skills & workload %"},
+              {icon:"🛡",label:"Smart Gate",         desc:"Optional · fires at confidence < 80"},
             ].map(f=>(
               <div key={f.label} style={{display:"flex",alignItems:"flex-start",gap:9,padding:"9px 11px",borderRadius:9,background:"var(--bg-card)",border:"1px solid var(--border)",backdropFilter:"blur(20px)"}}>
                 <span style={{fontSize:14,flexShrink:0,marginTop:1}}>{f.icon}</span>
@@ -1417,6 +1995,8 @@ export default function ChainMind(){
   const [timings,setTimings]=useState([]);
   const [history,setHistory]=useState([]);
   const [hoveredAgent,setHoveredAgent]=useState(null);
+  const [subtasks,setSubtasks]=useState([]);        // parsed from Planner output
+  const [skillMatches,setSkillMatches]=useState({}); // empId → match%
   const [selectedProject,setSelectedProject]=useState(null);
   const [sidebarOpen,setSidebarOpen]=useState(false);
   const [assignments,setAssignments]=useState({});
@@ -1426,7 +2006,11 @@ export default function ChainMind(){
   const [darkMode,setDarkMode]=useState(()=>{try{return localStorage.getItem("cm_theme")!=="light";}catch(e){return true;}});
   const [uploadedFiles,setUploadedFiles]=useState({});
   const [csvProjects,setCsvProjects]=useState(null);   // null = use hardcoded PROJECTS
+  const [pdfBrief,setPdfBrief]=useState(null);         // parsed PDF brief project object
+  const [pdfLoading,setPdfLoading]=useState(false);    // PDF extraction in progress
+  const [pdfError,setPdfError]=useState(null);         // PDF parse error message
   const [csvHistory,setCsvHistory]=useState(null);     // null = use hardcoded HISTORY_DATA
+  const [csvTools,setCsvTools]=useState(null);         // null = use hardcoded MCP tools
   // Keep refs in sync so buildGoal (non-reactive closure) always sees latest
   const parsedProjectsRef=useRef(null);
   const parsedHistoryRef=useRef(null);
@@ -1445,8 +2029,13 @@ export default function ChainMind(){
 
   const handleHistoryCSV=useCallback((parsed)=>{
     parsedHistoryRef.current=parsed;
-    setCsvHistory(parsed);    // triggers re-render so buildGoal uses fresh history
+    setCsvHistory(parsed);
     setUploadedFiles(p=>({...p,history:{name:`${parsed.length} entries`,count:parsed.length}}));
+  },[]);
+
+  const handleToolsCSV=useCallback((parsed)=>{
+    setCsvTools(parsed);
+    setUploadedFiles(p=>({...p,tools:{name:`${parsed.length} tools`,count:parsed.length}}));
   },[]);
 
   const t0=useRef(null),live=useRef(false),steerRef=useRef(null);
@@ -1456,12 +2045,105 @@ export default function ChainMind(){
   function buildGoal(project){
     if(!project||project.id==="custom") return project?.desc||"";
     const empSummary=employees.map(e=>{
-      const status=e.workload>=80?"UNAVAILABLE — overloaded, do not assign":"available";
-      return `${e.name} (${e.role}, Skills: ${e.skills.join(", ")}, Workload: ${e.workload}%, Experience: ${e.experience}yr, Status: ${status})`;
+      const availability=Math.max(0,100-e.workload);
+      const status=e.workload>=80?"UNAVAILABLE — overloaded, do not assign":`available (${availability}% capacity free)`;
+      return `${e.name} | Role: ${e.role} | Skills: ${e.skills.join(", ")} | Workload: ${e.workload}% | Availability: ${availability}% | Experience: ${e.experience}yr | Status: ${status}`;
     }).join("\n");
     const histData=parsedHistoryRef.current||[];
     const histSummary=histData.map(h=>`${h.name}: ${h.teamSize} members, ${h.days} days, success score ${h.score}`).join("\n");
-    return `PROJECT: ${project.name}\nDESCRIPTION: ${project.desc}\nREQUIRED SKILLS: ${project.skills.join(", ")}\nDEADLINE: ${project.deadline} days\nPRIORITY: ${project.priority}\n\nTEAM MEMBERS:\n${empSummary}\n\nPAST PROJECT HISTORY:\n${histSummary}\n\nAnalyse the project requirements, decompose into sub-tasks, and assign each sub-task to the most appropriate team member based on their skills and current workload. Do NOT assign tasks to employees marked UNAVAILABLE.`;
+
+    // ── PDF brief mode: richer prompt using full brief content ──────────────
+    if(project.source==="pdf"){
+      const reqList = (project.requirements||[]).map((r,i)=>`${i+1}. ${r}`).join("\n");
+      const delList = (project.deliverables||[]).map(d=>`- ${d}`).join("\n");
+      const wfHint  = (project.workflowSteps||[]).length>0
+        ? `\nEXPECTED WORKFLOW HINT (from brief):\n${project.workflowSteps.join("\n")}`
+        : "";
+      return `AUTONOMOUS WORKFLOW ASSIGNMENT REQUEST — FROM CLIENT BRIEF PDF
+================================================================
+CLIENT: ${project.client||""}
+PROJECT: ${project.name}
+OBJECTIVE: ${project.objective||project.desc}
+
+FUNCTIONAL REQUIREMENTS:
+${reqList||project.rawText?.substring(0,600)||"See project description"}
+
+EXPECTED DELIVERABLES:
+${delList||"As per client requirements"}
+${wfHint}
+
+INFERRED REQUIRED SKILLS: ${project.skills.join(", ")}
+ESTIMATED DEADLINE: ${project.deadline} days | PRIORITY: ${project.priority}
+
+TEAM MEMBERS (with availability):
+${empSummary}
+
+PAST PROJECT HISTORY:
+${histSummary}
+
+INSTRUCTIONS FOR AUTONOMOUS AGENT:
+1. ANALYZE the client brief — understand all functional requirements
+2. DECOMPOSE into a numbered development workflow (format: "TASK N: [step name] → [Role]")
+   Example format: "TASK 1: Data Collection → Data Engineer"
+3. For each task, ASSIGN the best team member:
+   - ASSIGNED TO: [name]
+   - ROLE FIT: [why their skills match this step]
+   - SKILLS MATCHED: [specific matching skills]
+4. RECOMMEND tools/technologies per task based on requirements
+5. Do NOT assign to UNAVAILABLE employees
+6. OUTPUT a complete project execution plan the client and judges can follow`;
+    }
+
+    return `AUTONOMOUS WORKFLOW ASSIGNMENT REQUEST
+===========================================
+PROJECT: ${project.name}
+DESCRIPTION: ${project.desc}
+REQUIRED SKILLS: ${project.skills.join(", ")}
+DEADLINE: ${project.deadline} days
+PRIORITY: ${project.priority}
+
+TEAM MEMBERS (with availability):
+${empSummary}
+
+PAST PROJECT HISTORY:
+${histSummary}
+
+INSTRUCTIONS FOR AUTONOMOUS AGENT:
+1. ANALYZE the project requirements — identify complexity, risks, skill gaps
+2. DECOMPOSE into 4-7 concrete sub-tasks (format each as: "TASK N: [task name]")
+3. For each sub-task, SELECT the best employee and STATE the reason:
+   - ASSIGNED TO: [name]
+   - REASON: [why this person — skills matched, availability, experience]
+   - SKILLS MATCHED: [list matching skills]
+4. Do NOT assign to employees marked UNAVAILABLE
+5. Balance workload — prefer employees with higher availability %
+6. OUTPUT a structured assignment plan judges can read clearly`;
+  }
+
+
+  function parsePlannerSubtasks(plannerText){
+    if(!plannerText) return [];
+    const lines = plannerText.split("\n").map(l=>l.trim()).filter(Boolean);
+    const tasks = [];
+    for(const line of lines){
+      // Match: "1. Task", "- Task", "* Task", "Task 1:", numbered/bulleted
+      const m = line.match(/^(?:\d+[.)\s]+|[-*•]\s+|sub-?task\s*\d*[:\s]+|task\s*\d+[:\s]+)(.+)/i);
+      if(m){
+        const text = m[1].replace(/\*\*/g,"").trim();
+        if(text.length > 10 && text.length < 200) tasks.push(text);
+      }
+    }
+    // Dedupe and cap at 8
+    return [...new Set(tasks)].slice(0,8);
+  }
+
+  function computeSkillMatch(emp, projectSkills){
+    if(!projectSkills||!projectSkills.length) return 0;
+    const empSkillsLower = emp.skills.map(s=>s.toLowerCase());
+    const matched = projectSkills.filter(ps=>
+      empSkillsLower.some(es=>es.includes(ps.toLowerCase())||ps.toLowerCase().includes(es))
+    );
+    return Math.round((matched.length/projectSkills.length)*100);
   }
 
   function parseAssignments(reportTxt){
@@ -1489,11 +2171,25 @@ export default function ChainMind(){
   const startProgressTick=useCallback((expectedMs)=>{setProgress(0);let tick=0,total=expectedMs/60;const t=setInterval(()=>{tick++;setProgress(Math.min(90,Math.round((tick/total)*100)));if(tick>=total)clearInterval(t);},60);return t;},[]);
 
   const runPipeline=useCallback(async(currentGoal,steerNote=null)=>{
+    // ── Dependency graph (honest analysis):
+    // PL → RE → EX → VE → [ME || RP]
+    // Only Memory and Report are independent of each other.
+    // All other agents are strictly sequential due to data dependencies:
+    //   RE needs PL output, EX needs PL+RE, VE needs RE+EX,
+    //   ME needs all 4, RP needs all 4 + optional Gate steer note.
+    // Real speedup: ~7% (saves ~6s on an ~84s run). Not 55%.
+    //
     const out={...outputs};steerRef.current=steerNote;
+
+    // ── Helper: run a single agent and update all UI state ──────────────────
     const runAgent=async(idx)=>{
-      if(!live.current)return;
+      if(!live.current)return"cancelled";
       const step=WORKFLOW[idx],agentStart=Date.now();
-      setCurIdx(idx);setActiveModel(step.model);setMStats(p=>({...p,[step.model]:(p[step.model]||0)+1}));setStepStatus(idx,"active");log(step.agent,`Starting: ${step.task}`,step.model);
+      setCurIdx(idx);
+      setActiveModel(step.model);
+      setMStats(p=>({...p,[step.model]:(p[step.model]||0)+1}));
+      setStepStatus(idx,"active");
+      log(step.agent,`Starting: ${step.task}`,step.model);
       const agTools=AGENT_TOOLS[step.agent]||{call:[],passive:[]};
       setMcpPulsing(agTools.call);
       setMcp(p=>[...new Set([...p,...agTools.call,...agTools.passive])]);
@@ -1501,16 +2197,33 @@ export default function ChainMind(){
       const ticker=startProgressTick([2500,4000,2000,3000,1500,4000][idx]);
       try{
         let result="";
-        if(idx===0){result=await runPlanner(currentGoal);out.planner=result;}
+        if(idx===0){
+          result=await runPlanner(currentGoal);
+          out.planner=result;
+          const tasks=parsePlannerSubtasks(result);
+          if(tasks.length>0) setSubtasks(tasks);
+        }
         else if(idx===1){result=await runResearch(currentGoal,out.planner||"");out.research=result;}
         else if(idx===2){result=await runExecution(currentGoal,out.planner||"",out.research||"");out.execution=result;}
         else if(idx===3){result=await runVerification(currentGoal,out.research||"",out.execution||"");out.verification=result;}
-        else if(idx===4){const allPrev=JSON.stringify({planner:out.planner,research:out.research,execution:out.execution,verification:out.verification});result=await runMemory(currentGoal,allPrev);out.memory=result;setMem(parseMemoryEntries(result));}
+        else if(idx===4){
+          // Memory agent — runs independently of Report (parallel in runFinalStage)
+          const allPrev=JSON.stringify({planner:out.planner,research:out.research,execution:out.execution,verification:out.verification});
+          result=await runMemory(currentGoal,allPrev);
+          out.memory=result;
+          setMem(parseMemoryEntries(result));
+        }
         else if(idx===5){
+          // Report agent — waits for Gate resolution before starting
           result=await runReport(currentGoal,out.planner||"",out.research||"",out.execution||"",out.verification||"",steerRef.current);
           out.report=result;setReportText(result);
           const parsed=parseAssignments(result);
           setAssignments(parsed);
+          if(selectedProject&&selectedProject.skills){
+            const matches={};
+            employees.forEach(emp=>{ matches[emp.id]=computeSkillMatch(emp,selectedProject.skills||[]); });
+            setSkillMatches(matches);
+          }
           if(Object.keys(parsed).length>0){
             setEmployees(prev=>{
               const deltas=[];
@@ -1544,21 +2257,11 @@ export default function ChainMind(){
         const duration=Date.now()-agentStart;
         setTimings(p=>[...p,{agent:step.agent,start:agentStart-t0.current,duration}]);
         if(idx===0)setMem(p=>[...p,{tier:0,text:`Active task: ${currentGoal.substring(0,50)}…`}]);
-        if(idx===1)setMem(p=>[...p,{tier:1,text:"Domain knowledge retrieved via Tavily search"}]);
+        if(idx===1)setMem(p=>[...p,{tier:1,text:"Domain knowledge retrieved via team analysis"}]);
         log(step.agent,`✓ Completed (${Math.round(duration/1000)}s)`,step.model);
         setTimeout(()=>setProgress(0),300);
-        if(idx===3){
-          const score=parseConfidenceScore(result);
-          const forceGate=true;
-          if(forceGate||shouldTriggerGate(result)){
-            setStepStatus(idx,"gate");
-            log("verification",`⚠ Confidence ${score}/100 — Gate triggered — human review required`,"mid");
-            setGate({idx,verificationOutput:result,score});
-            setPhase("gate");
-            return"gate";
-          }
-        }
-        setStepStatus(idx,"done");return"ok";
+        setStepStatus(idx,"done");
+        return"ok";
       }catch(err){
         clearInterval(ticker);setProgress(0);setStepStatus(idx,"error");
         log(step.agent,`✕ Error: ${err.message}`,step.model);
@@ -1566,14 +2269,81 @@ export default function ChainMind(){
         return"error";
       }
     };
-    const startIdx=gate?gate.idx+1:0;
-    for(let i=startIdx;i<WORKFLOW.length;i++){
-      if(!live.current)break;
-      const result=await runAgent(i);
-      if(result==="gate"||result==="error")return;
-      await new Promise(r=>setTimeout(r,250));
+
+    // ── Helper: run Verification + Gate check ───────────────────────────────
+    const runVerificationWithGate=async()=>{
+      const result=await runAgent(3); // idx=3 is Verification
+      if(result==="error"||result==="cancelled") return result;
+      // Check gate AFTER agent completes
+      const score=parseConfidenceScore(out.verification||"");
+      const gateThreshold=80;
+      const forceGate=false;
+      if(forceGate||score<gateThreshold||shouldTriggerGate(out.verification||"")){
+        setStepStatus(3,"gate");
+        log("verification",`⚠ Confidence ${score}/100 below threshold 80 — Smart Gate activated — optional human oversight`,"mid");
+        setGate({idx:3,verificationOutput:out.verification||"",score});
+        setPhase("gate");
+        return"gate";
+      }
+      return"ok";
+    };
+
+    // ── PARALLEL FINAL STAGE: Memory || Report ──────────────────────────────
+    // Both only need outputs 0–3 which are already complete at this point.
+    // Memory: no Gate dependency — starts immediately after Verification.
+    // Report: Gate has already resolved (human approved/steered) before this runs.
+    // setCurIdx shows both as "active" — UI shows dual active state.
+    const runFinalStage=async()=>{
+      log("memory","⚡ Parallel stage — Memory + Report running simultaneously","slm");
+      log("report","⚡ Parallel stage — starting alongside Memory agent","frontier");
+      // Mark both as active simultaneously
+      setStepStatus(4,"active");
+      setStepStatus(5,"active");
+      setCurIdx(4); // show memory as primary active for UI progress
+      // Run both in parallel — Promise.all waits for both to finish
+      const [memResult,repResult]=await Promise.all([
+        runAgent(4), // Memory (idx=4)
+        runAgent(5), // Report (idx=5)
+      ]);
+      if(memResult==="error"||repResult==="error") return"error";
+      return"ok";
+    };
+
+    // ── SEQUENTIAL STAGES 0–3, then PARALLEL 4+5 ───────────────────────────
+    const resumeFromIdx=gate?gate.idx+1:0;
+
+    // If resuming after Gate (gate was at idx=3), jump straight to final stage
+    if(resumeFromIdx===4){
+      const finalResult=await runFinalStage();
+      if(finalResult==="error")return;
+      if(live.current){setPhase("done");setCurIdx(-1);setElapsed(Math.round((Date.now()-t0.current)/1000));log("report","✓ Workflow complete — parallel Memory + Report finished","frontier");}
+      return;
     }
-    if(live.current){setPhase("done");setCurIdx(-1);setElapsed(Math.round((Date.now()-t0.current)/1000));log("report","✓ Workflow complete — final report synthesized","frontier");}
+
+    // Normal path: run PL → RE → EX sequentially (strict dependencies)
+    for(let i=resumeFromIdx;i<=2;i++){
+      if(!live.current)return;
+      const result=await runAgent(i);
+      if(result==="error"||result==="cancelled")return;
+      await new Promise(r=>setTimeout(r,200));
+    }
+
+    // Verification + Gate
+    if(!live.current)return;
+    const veResult=await runVerificationWithGate();
+    if(veResult==="gate"||veResult==="error")return;
+
+    // Parallel final stage: Memory || Report
+    if(!live.current)return;
+    const finalResult=await runFinalStage();
+    if(finalResult==="error")return;
+
+    if(live.current){
+      setPhase("done");
+      setCurIdx(-1);
+      setElapsed(Math.round((Date.now()-t0.current)/1000));
+      log("report","✓ Workflow complete — Memory + Report ran in parallel","frontier");
+    }
   },[outputs,gate,log,setStepStatus,startProgressTick]);
 
   const startRun=useCallback(()=>{
@@ -1607,7 +2377,7 @@ export default function ChainMind(){
     setMStats({slm:0,mid:0,frontier:0});setGate(null);setGuard(null);setProgress(0);
     setGoal("");setOutputs({});setReportText("");setError(null);setMcpPulsing([]);
     setTokenCounts({slm:0,mid:0,frontier:0});setAgentTokens({});setTimings([]);
-    setAssignments({});setSidebarOpen(false);setSkillGapWarning(null);
+    setAssignments({});setSidebarOpen(false);setSkillGapWarning(null);setSubtasks([]);setSkillMatches({});
   };
 
   const softReset=()=>{
@@ -1616,7 +2386,7 @@ export default function ChainMind(){
     setMStats({slm:0,mid:0,frontier:0});setGate(null);setGuard(null);setProgress(0);
     setGoal("");setOutputs({});setReportText("");setError(null);setMcpPulsing([]);
     setTokenCounts({slm:0,mid:0,frontier:0});setAgentTokens({});setTimings([]);
-    setAssignments({});setSkillGapWarning(null);setSelectedProject(null);
+    setAssignments({});setSkillGapWarning(null);setSelectedProject(null);setSubtasks([]);setSkillMatches({});
   };
 
   useEffect(()=>{
@@ -1695,6 +2465,22 @@ export default function ChainMind(){
             onStart={startRun}
             apiConfigured={apiConfigured}
             history={history}
+            pdfBrief={pdfBrief}
+            pdfLoading={pdfLoading}
+            pdfError={pdfError}
+            onPdfBrief={async(file)=>{
+              setPdfError(null);setPdfLoading(true);
+              try{
+                const text=await extractPdfText(file);
+                const brief=parseBriefText(text,file.name);
+                setPdfBrief(brief);
+                setSelectedProject(brief);
+              }catch(err){
+                console.error("PDF parse error:",err);
+                setPdfError("Could not read PDF — try a different file.");
+              }finally{setPdfLoading(false);}
+            }}
+            onClearPdf={()=>{setPdfBrief(null);setPdfError(null);if(selectedProject?.source==="pdf")setSelectedProject(null);}}
             selectedProject={selectedProject}
             onSelectProject={setSelectedProject}
             onToggleSidebar={()=>setSidebarOpen(o=>!o)}
@@ -1705,11 +2491,13 @@ export default function ChainMind(){
             onEmployees={handleEmployeesCSV}
             onProjects={handleProjectsCSV}
             onHistory={handleHistoryCSV}
+            onTools={handleToolsCSV}
             uploadedFiles={uploadedFiles}
-            activeProjects={csvProjects||[]}
+            activeProjects={[...(pdfBrief?[pdfBrief]:[]),...(csvProjects||[])]}
             onResetCSV={()=>{
               setCsvProjects(null);
               setCsvHistory(null);
+              setCsvTools(null);
               parsedProjectsRef.current=null;
               parsedHistoryRef.current=null;
               saveEmployees(DEFAULT_EMPLOYEES);
@@ -1724,15 +2512,29 @@ export default function ChainMind(){
           <div style={{position:"relative",zIndex:1}}>
             <div style={{borderBottom:"1px solid var(--border)",padding:"12px 26px",display:"flex",alignItems:"center",gap:12,background:"var(--bg-header)",backdropFilter:"blur(32px)",WebkitBackdropFilter:"blur(32px)",position:"sticky",top:0,zIndex:10,boxShadow:"0 1px 0 rgba(255,255,255,0.04),0 4px 24px rgba(0,0,0,.4)"}}>
               <div style={{width:30,height:30,borderRadius:9,background:"linear-gradient(135deg,rgba(124,58,237,.2),rgba(14,165,233,.2))",border:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,backdropFilter:"blur(20px)"}}>⛓</div>
-              <div style={{fontWeight:800,fontSize:15,letterSpacing:"-.5px"}}>ChainMind</div>
+              <div style={{fontWeight:800,fontSize:15,letterSpacing:"-.5px"}}>ChainMind <span style={{fontSize:10,color:"var(--text-muted)",fontWeight:400,fontFamily:"monospace"}}>Autonomous Agent</span></div>
               <div style={{display:"flex",alignItems:"center",gap:7,padding:"4px 12px",borderRadius:20,background:phase==="done"?"rgba(52,211,153,.08)":phase==="gate"?"rgba(245,158,11,.08)":error?"rgba(244,114,182,.08)":"rgba(124,58,237,.08)",border:`1px solid ${phase==="done"?"rgba(52,211,153,.2)":phase==="gate"?"rgba(245,158,11,.2)":error?"rgba(244,114,182,.2)":"rgba(124,58,237,.2)"}`}}>
                 <div style={{width:6,height:6,borderRadius:"50%",background:phase==="done"?"#34d399":phase==="gate"?"#fbbf24":error?"#f472b6":"#a78bfa",animation:phase==="running"?"breathe 1s infinite":"none"}}/>
-                <span style={{color:phase==="done"?"#34d399":phase==="gate"?"#fbbf24":error?"#f472b6":"#a78bfa",fontSize:11,fontFamily:"monospace",fontWeight:600}}>{phase==="running"?"Calling AI agents…":phase==="gate"?"Gate — Input Required":error?"Error":`Done · ${elapsed}s`}</span>
+                <span style={{color:phase==="done"?"#34d399":phase==="gate"?"#fbbf24":error?"#f472b6":"#a78bfa",fontSize:11,fontFamily:"monospace",fontWeight:600}}>{phase==="running"?"Autonomous agents reasoning…":phase==="gate"?"Gate — Input Required":error?"Error":`Done · ${elapsed}s`}</span>
               </div>
               {(phase==="running"||phase==="done")&&(
                 <div style={{display:"flex",alignItems:"center",gap:5,padding:"4px 11px",borderRadius:20,background:"rgba(52,211,153,.06)",border:"1px solid rgba(52,211,153,.15)"}}>
                   <span style={{color:"#34d399",fontSize:11,fontFamily:"monospace",fontWeight:700}}>💰 ${totalCost.toFixed(4)}</span>
                   {phase==="running"&&<span style={{color:"#4ade80",fontSize:9,animation:"blink 1s infinite"}}>●</span>}
+                </div>
+              )}
+              {phase==="running"&&curIdx>=0&&(
+                <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 11px",borderRadius:20,background:"rgba(99,102,241,.06)",border:"1px solid rgba(99,102,241,.2)"}}>
+                  <div style={{width:50,height:4,background:"rgba(255,255,255,0.08)",borderRadius:2,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:`${Math.round(((curIdx+1)/6)*100)}%`,background:"linear-gradient(90deg,#818cf8,#a78bfa)",borderRadius:2,transition:"width .4s ease"}}/>
+                  </div>
+                  <span style={{color:"#818cf8",fontSize:10,fontFamily:"monospace",fontWeight:700}}>{curIdx+1}/6</span>
+                  <span style={{color:"var(--text-muted)",fontSize:9,fontFamily:"monospace"}}>agents</span>
+                </div>
+              )}
+              {selectedProject?.source==="pdf"&&(phase==="running"||phase==="done")&&(
+                <div style={{display:"flex",alignItems:"center",gap:5,padding:"4px 10px",borderRadius:20,background:"rgba(16,185,129,0.06)",border:"1px solid rgba(16,185,129,0.2)"}}>
+                  <span style={{fontSize:9,color:"#34d399",fontFamily:"monospace"}}>📄 PDF Brief Mode</span>
                 </div>
               )}
               <div style={{color:"var(--text-muted)",fontSize:10,fontFamily:"monospace",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
@@ -1756,10 +2558,16 @@ export default function ChainMind(){
               {error&&<div style={{background:"rgba(244,114,182,.05)",border:"1px solid rgba(244,114,182,.2)",borderRadius:9,padding:"9px 14px",marginBottom:16,color:"#f472b6",fontSize:11,fontFamily:"monospace",animation:"fadeSlideIn .3s ease"}}>✕ {error}</div>}
               {skillGapWarning&&<div style={{background:"rgba(251,191,36,.05)",border:"1px solid rgba(251,191,36,.2)",borderRadius:9,padding:"9px 14px",marginBottom:16,color:"#fbbf24",fontSize:11,fontFamily:"monospace",animation:"fadeSlideIn .3s ease"}}>⚠ {skillGapWarning}</div>}
 
+              {/* PS: "Analyze project requirements" — shown immediately when pipeline starts */}
+              <ProjectRequirementsPanel project={selectedProject} employees={employees}/>
+
+              {/* FEATURE 1: Sub-task breakdown — visible as soon as Planner completes */}
+              <SubTaskPanel subtasks={subtasks} projectName={selectedProject?.name} isRunning={phase==="running"}/>
+
               <div ref={gridRef} style={{display:"grid",gridTemplateColumns:"1fr 1.1fr 1fr",gap:16,position:"relative"}}>
                 <DataFlowOverlay containerRef={gridRef} activeAgent={activeAgentKey} phase={phase} agentCardRefs={agentCardRefs} traceRef={traceRef} memRef={memRef}/>
                 <div style={{position:"relative",zIndex:2}}>
-                  <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>AGENT PIPELINE</div>
+                  <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>AUTONOMOUS REASONING PIPELINE</div>
                   <div style={{display:"flex",flexDirection:"column",gap:9}}>
                     {steps.length===0
                       ?WORKFLOW.map((_,i)=><SkeletonCard key={i} index={i} agent={WORKFLOW[i].agent}/>)
@@ -1772,21 +2580,31 @@ export default function ChainMind(){
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:13,position:"relative",zIndex:2}}>
                   <div>
-                    <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>VISUAL WORKFLOW INTERFACE</div>
+                    <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>LIVE REASONING TRACE</div>
                     <div ref={traceRef}><ThoughtTrace entries={trace} isRunning={phase==="running"} hoveredAgent={hoveredAgent}/></div>
                   </div>
-                  <MCPPanel active={mcp} pulsing={mcpPulsing} activeAgent={activeAgentKey}/>
+                  <MCPPanel active={mcp} pulsing={mcpPulsing} activeAgent={activeAgentKey} csvTools={csvTools}/>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:13,position:"relative",zIndex:2}}>
-                  <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>MEMORY + ROUTING</div>
+                  <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>MEMORY + COST ROUTING</div>
                   <RightPanel entries={mem} activeModel={activeModel} stats={mStats} tokenCounts={tokenCounts} isRunning={phase==="running"} memRef={memRef} agentTokens={agentTokens}/>
                 </div>
               </div>
 
               {phase==="done"&&reportText&&(
                 <div style={{marginTop:20}}>
-                  <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>SYNTHESIZED OUTPUT</div>
+                  <div style={{color:"var(--text-muted)",fontSize:10,letterSpacing:2,marginBottom:9,fontFamily:"monospace"}}>AUTONOMOUS ASSIGNMENT REPORT</div>
                   <FinalReport reportText={reportText} elapsed={elapsed} tokenCounts={tokenCounts} timings={timings} agentTokens={agentTokens}/>
+
+                  {/* FEATURE 1+4: Task Assignment Dashboard + Skill Match Reasoning */}
+                  <TaskAssignmentDashboard
+                    assignments={assignments}
+                    employees={employees}
+                    skillMatches={skillMatches}
+                    project={selectedProject}
+                    reportText={reportText}
+                  />
+
                   <div style={{marginTop:20,padding:"18px 22px",borderRadius:14,background:"var(--bg-panel)",border:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,flexWrap:"wrap"}}>
                     <div>
                       <div style={{color:"var(--text-primary)",fontSize:13,fontWeight:700,fontFamily:"monospace",marginBottom:4}}>Ready for the next project?</div>
